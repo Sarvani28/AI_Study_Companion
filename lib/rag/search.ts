@@ -3,8 +3,7 @@ import OpenAI from "openai";
 import { createClient } from "@/lib/supabase/server";
 
 const openai = new OpenAI({
-  apiKey:
-    process.env.OPENAI_API_KEY,
+  apiKey: process.env.OPENAI_API_KEY,
 });
 
 const EMBEDDING_MODEL =
@@ -12,50 +11,44 @@ const EMBEDDING_MODEL =
 
 export type RagChunk = {
   id: string;
-  material_id: string;
-  project_id: string;
+  materialId: string;
+  projectId: string;
   content: string;
-  page_number: number | null;
-  chunk_index: number;
+  pageNumber: number | null;
+  chunkIndex: number;
   similarity: number;
   filename: string;
 };
 
 export async function searchProjectKnowledge(
   projectId: string,
-  query: string,
-) {
+  question: string,
+): Promise<RagChunk[]> {
   const supabase =
     await createClient();
 
   /*
-   * ----------------------------------------------------------
-   * AUTH
-   * ----------------------------------------------------------
+   * 1. Authenticate the user.
    */
-
   const {
-    data: { user },
-    error: userError,
-  } =
-    await supabase.auth.getUser();
+    data: {
+      user,
+    },
+  } = await supabase.auth.getUser();
 
-  if (userError || !user) {
+  if (!user) {
     throw new Error(
-      "You must be logged in.",
+      "Unauthorized",
     );
   }
 
   /*
-   * ----------------------------------------------------------
-   * PROJECT AUTHORIZATION
-   * ----------------------------------------------------------
+   * 2. Verify project ownership.
+   *
+   * This is an additional application-level
+   * authorization check.
    */
-
-  const {
-    data: project,
-    error: projectError,
-  } =
+  const { data: project, error: projectError } =
     await supabase
       .from("projects")
       .select("id")
@@ -65,7 +58,7 @@ export async function searchProjectKnowledge(
 
   if (projectError) {
     throw new Error(
-      `Unable to verify project: ${projectError.message}`,
+      `Failed to verify project: ${projectError.message}`,
     );
   }
 
@@ -76,28 +69,33 @@ export async function searchProjectKnowledge(
   }
 
   /*
-   * ----------------------------------------------------------
-   * QUERY EMBEDDING
-   * ----------------------------------------------------------
+   * 3. Generate the embedding for the
+   * user's question.
    */
-
   const embeddingResponse =
     await openai.embeddings.create({
       model: EMBEDDING_MODEL,
-      input: query,
-      dimensions: 1536,
+      input: question,
     });
 
   const queryEmbedding =
-    embeddingResponse.data[0]
-      .embedding;
+    embeddingResponse.data[0]?.embedding;
+
+  if (!queryEmbedding) {
+    throw new Error(
+      "Failed to generate question embedding.",
+    );
+  }
 
   /*
-   * ----------------------------------------------------------
-   * PROJECT-SCOPED VECTOR SEARCH
-   * ----------------------------------------------------------
+   * 4. Search pgvector.
+   *
+   * IMPORTANT:
+   *
+   * match_project_id is the CURRENT project.
+   *
+   * The SQL function also checks auth.uid().
    */
-
   const {
     data,
     error,
@@ -110,8 +108,7 @@ export async function searchProjectKnowledge(
       match_project_id:
         projectId,
 
-      match_threshold:
-        0.72,
+      match_threshold: 0.72,
 
       match_count: 8,
     },
@@ -119,10 +116,27 @@ export async function searchProjectKnowledge(
 
   if (error) {
     throw new Error(
-      `Knowledge search failed: ${error.message}`,
+      `RAG search failed: ${error.message}`,
     );
   }
 
-  return (data ??
-    []) as RagChunk[];
+  return (data ?? []).map(
+    (row) => ({
+      id: row.id,
+      materialId:
+        row.material_id,
+      projectId:
+        row.project_id,
+      content:
+        row.content,
+      pageNumber:
+        row.page_number,
+      chunkIndex:
+        row.chunk_index,
+      similarity:
+        Number(row.similarity),
+      filename:
+        row.filename,
+    }),
+  );
 }
