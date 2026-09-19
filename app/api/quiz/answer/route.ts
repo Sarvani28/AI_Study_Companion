@@ -15,15 +15,24 @@ export async function POST(
     await createClient();
 
   try {
+    /*
+     * ------------------------------------------
+     * 1. Authenticate
+     * ------------------------------------------
+     */
+
     const {
-      data: { user },
+      data: {
+        user,
+      },
     } =
       await supabase.auth.getUser();
 
     if (!user) {
       return NextResponse.json(
         {
-          error: "Unauthorized.",
+          error:
+            "Unauthorized.",
         },
         {
           status: 401,
@@ -60,8 +69,11 @@ export async function POST(
     }
 
     /*
-     * Get active session.
+     * ------------------------------------------
+     * 2. Verify session
+     * ------------------------------------------
      */
+
     const {
       data: session,
       error: sessionError,
@@ -113,12 +125,14 @@ export async function POST(
     }
 
     /*
-     * Get question.
+     * ------------------------------------------
+     * 3. Load question
+     * ------------------------------------------
      */
+
     const {
       data: question,
-      error:
-        questionError,
+      error: questionError,
     } =
       await supabase
         .from("quiz_questions")
@@ -129,10 +143,8 @@ export async function POST(
             project_id,
             concept_id,
             question,
-            question_type,
             correct_answer,
-            explanation,
-            difficulty
+            explanation
           `
         )
         .eq(
@@ -166,64 +178,33 @@ export async function POST(
     }
 
     /*
-     * Prevent duplicate answers.
+     * ------------------------------------------
+     * 4. Evaluate
+     * ------------------------------------------
      */
-    const {
-      data: existingAnswer,
-    } =
-      await supabase
-        .from("quiz_answers")
-        .select("id")
-        .eq(
-          "quiz_question_id",
-          questionId
-        )
-        .eq(
-          "user_id",
-          user.id
-        )
-        .maybeSingle();
 
-    if (existingAnswer) {
-      return NextResponse.json(
-        {
-          error:
-            "This question has already been answered.",
-        },
-        {
-          status: 409,
-        }
-      );
-    }
-
-    /*
-     * MCQ evaluation is deterministic.
-     *
-     * The model is NOT involved in grading.
-     */
     const isCorrect =
-      normalizeAnswer(answer) ===
-      normalizeAnswer(
-        question.correct_answer ??
-          ""
-      );
+      answer.trim() ===
+      question.correct_answer.trim();
 
     const score =
       isCorrect ? 100 : 0;
 
     /*
-     * Store answer.
+     * ------------------------------------------
+     * 5. Save answer
+     * ------------------------------------------
      */
+
     const {
       data: savedAnswer,
-      error:
-        answerError,
+      error: answerError,
     } =
       await supabase
         .from("quiz_answers")
         .insert({
           quiz_question_id:
-            questionId,
+            question.id,
 
           user_id:
             user.id,
@@ -237,13 +218,15 @@ export async function POST(
 
           feedback:
             isCorrect
-              ? "Correct."
-              : "Not quite. Review the explanation and the related material.",
+              ? "Correct answer."
+              : "Review this concept and try another targeted question.",
 
           evaluated_at:
             new Date().toISOString(),
         })
-        .select()
+        .select(
+          "id, is_correct, score, feedback"
+        )
         .single();
 
     if (answerError) {
@@ -251,48 +234,310 @@ export async function POST(
     }
 
     /*
-     * Update mastery.
+     * ------------------------------------------
+     * 6. Update concept mastery
+     * ------------------------------------------
      */
-    let mastery = null;
 
-    if (question.concept_id) {
-      mastery =
-        await updateConceptMastery({
-          supabase,
-          userId: user.id,
-          projectId:
+    let masteryResult:
+      | {
+          oldScore: number;
+          newScore: number;
+          confidence: number;
+          trend: string;
+        }
+      | null = null;
+
+    if (
+      question.concept_id
+    ) {
+      const {
+        data: existingMastery,
+        error:
+          masteryReadError,
+      } =
+        await supabase
+          .from("concept_mastery")
+          .select(
+            `
+              id,
+              mastery_score,
+              confidence,
+              attempt_count,
+              correct_count
+            `
+          )
+          .eq(
+            "project_id",
+            session.project_id
+          )
+          .eq(
+            "concept_id",
+            question.concept_id
+          )
+          .eq(
+            "user_id",
+            user.id
+          )
+          .maybeSingle();
+
+      if (masteryReadError) {
+        throw masteryReadError;
+      }
+
+      const oldScore =
+        Number(
+          existingMastery
+            ?.mastery_score ??
+            0
+        );
+
+      const oldConfidence =
+        Number(
+          existingMastery
+            ?.confidence ??
+            0
+        );
+
+      const oldAttempts =
+        Number(
+          existingMastery
+            ?.attempt_count ??
+            0
+        );
+
+      const oldCorrect =
+        Number(
+          existingMastery
+            ?.correct_count ??
+            0
+        );
+
+      /*
+       * PRD prototype mastery update:
+       *
+       * old * .7 + score * .3
+       */
+      const newScore =
+        oldScore * 0.7 +
+        score * 0.3;
+
+      const attemptCount =
+        oldAttempts + 1;
+
+      const correctCount =
+        oldCorrect +
+        (isCorrect ? 1 : 0);
+
+      /*
+       * Confidence gradually increases
+       * with evidence.
+       */
+      const confidence =
+        Math.min(
+          100,
+          oldConfidence +
+            8
+        );
+
+      let trend =
+        "stable";
+
+      if (
+        newScore >
+        oldScore + 5
+      ) {
+        trend =
+          "improving";
+      } else if (
+        newScore <
+        oldScore - 5
+      ) {
+        trend =
+          "needs_attention";
+      }
+
+      if (
+        existingMastery
+      ) {
+        const {
+          error:
+            masteryUpdateError,
+        } =
+          await supabase
+            .from(
+              "concept_mastery"
+            )
+            .update({
+              mastery_score:
+                Number(
+                  newScore.toFixed(
+                    2
+                  )
+                ),
+
+              confidence:
+                Number(
+                  confidence.toFixed(
+                    2
+                  )
+                ),
+
+              attempt_count:
+                attemptCount,
+
+              correct_count:
+                correctCount,
+
+              last_assessed_at:
+                new Date().toISOString(),
+
+              trend,
+
+              updated_at:
+                new Date().toISOString(),
+            })
+            .eq(
+              "id",
+              existingMastery.id
+            )
+            .eq(
+              "user_id",
+              user.id
+            );
+
+        if (
+          masteryUpdateError
+        ) {
+          throw masteryUpdateError;
+        }
+      } else {
+        const {
+          error:
+            masteryInsertError,
+        } =
+          await supabase
+            .from(
+              "concept_mastery"
+            )
+            .insert({
+              project_id:
+                session.project_id,
+
+              concept_id:
+                question.concept_id,
+
+              user_id:
+                user.id,
+
+              mastery_score:
+                Number(
+                  newScore.toFixed(
+                    2
+                  )
+                ),
+
+              confidence:
+                confidence,
+
+              attempt_count:
+                1,
+
+              correct_count:
+                isCorrect
+                  ? 1
+                  : 0,
+
+              last_assessed_at:
+                new Date().toISOString(),
+
+              trend,
+            });
+
+        if (
+          masteryInsertError
+        ) {
+          throw masteryInsertError;
+        }
+      }
+
+      masteryResult = {
+        oldScore,
+        newScore,
+        confidence,
+        trend,
+      };
+
+      /*
+       * ------------------------------------------
+       * Mastery event
+       * ------------------------------------------
+       */
+
+      await supabase
+        .from(
+          "activity_events"
+        )
+        .insert({
+          user_id:
+            user.id,
+
+          project_id:
             session.project_id,
-          conceptId:
-            question.concept_id,
-          score,
-          isCorrect,
+
+          event_type:
+            "MASTERY_UPDATED",
+
+          metadata: {
+            conceptId:
+              question.concept_id,
+
+            oldScore,
+
+            newScore,
+
+            score,
+
+            isCorrect,
+          },
         });
     }
 
     /*
-     * Determine quiz progress.
+     * ------------------------------------------
+     * 7. Question answered event
+     * ------------------------------------------
      */
-    const {
-      data: questions,
-      error:
-        questionsError,
-    } =
-      await supabase
-        .from("quiz_questions")
-        .select("id")
-        .eq(
-          "quiz_session_id",
-          quizSessionId
-        );
 
-    if (questionsError) {
-      throw questionsError;
-    }
+    await supabase
+      .from(
+        "activity_events"
+      )
+      .insert({
+        user_id:
+          user.id,
 
-    const questionIds =
-      questions?.map(
-        (item) => item.id
-      ) ?? [];
+        project_id:
+          session.project_id,
+
+        event_type:
+          "QUESTION_ANSWERED",
+
+        metadata: {
+          quizSessionId,
+          questionId,
+          conceptId:
+            question.concept_id,
+          isCorrect,
+          score,
+        },
+      });
+
+    /*
+     * ------------------------------------------
+     * 8. Progress
+     * ------------------------------------------
+     */
 
     const {
       data: answers,
@@ -302,66 +547,97 @@ export async function POST(
       await supabase
         .from("quiz_answers")
         .select(
-          "quiz_question_id, score"
+          `
+            id,
+            score,
+            quiz_questions!inner (
+              quiz_session_id
+            )
+          `
         )
         .eq(
           "user_id",
           user.id
         )
-        .in(
-          "quiz_question_id",
-          questionIds.length
-            ? questionIds
-            : [questionId]
+        .eq(
+          "quiz_questions.quiz_session_id",
+          quizSessionId
         );
 
     if (answersError) {
       throw answersError;
     }
 
-    const answeredCount =
+    const totalAnswers =
       answers?.length ?? 0;
 
-    const totalQuestions =
-      questionIds.length;
+    const totalScore =
+      answers?.reduce(
+        (
+          total,
+          item
+        ) =>
+          total +
+          Number(
+            item.score ?? 0
+          ),
+        0
+      ) ?? 0;
 
-    const isComplete =
+    const {
+      count: totalQuestions,
+    } =
+      await supabase
+        .from(
+          "quiz_questions"
+        )
+        .select(
+          "id",
+          {
+            count:
+              "exact",
+            head: true,
+          }
+        )
+        .eq(
+          "quiz_session_id",
+          quizSessionId
+        );
+
+    const complete =
+      totalQuestions !==
+        null &&
       totalQuestions > 0 &&
-      answeredCount >=
+      totalAnswers >=
         totalQuestions;
 
-    let finalScore:
-      | number
-      | null = null;
+    const averageScore =
+      totalAnswers > 0
+        ? totalScore /
+          totalAnswers
+        : 0;
 
-    if (isComplete) {
-      const totalScore =
-        (answers ?? []).reduce(
-          (
-            total,
-            item
-          ) =>
-            total +
-            Number(
-              item.score ?? 0
-            ),
-          0
-        );
+    /*
+     * ------------------------------------------
+     * 9. Complete quiz
+     * ------------------------------------------
+     */
 
-      finalScore =
-        Math.round(
-          totalScore /
-            totalQuestions
-        );
-
+    if (complete) {
       await supabase
-        .from("quiz_sessions")
+        .from(
+          "quiz_sessions"
+        )
         .update({
           status:
             "completed",
 
           score:
-            finalScore,
+            Number(
+              averageScore.toFixed(
+                2
+              )
+            ),
 
           completed_at:
             new Date().toISOString(),
@@ -376,7 +652,9 @@ export async function POST(
         );
 
       await supabase
-        .from("activity_events")
+        .from(
+          "activity_events"
+        )
         .insert({
           user_id:
             user.id,
@@ -390,29 +668,8 @@ export async function POST(
           metadata: {
             quizSessionId,
             score:
-              finalScore,
-            questionCount:
-              totalQuestions,
-          },
-        });
-    } else {
-      await supabase
-        .from("activity_events")
-        .insert({
-          user_id:
-            user.id,
-
-          project_id:
-            session.project_id,
-
-          event_type:
-            "QUESTION_ANSWERED",
-
-          metadata: {
-            quizSessionId,
-            questionId,
-            isCorrect,
-            score,
+              averageScore,
+            totalQuestions,
           },
         });
     }
@@ -422,34 +679,38 @@ export async function POST(
         id:
           savedAnswer.id,
 
-        isCorrect,
+        isCorrect:
+          savedAnswer.is_correct,
 
-        score,
+        score:
+          savedAnswer.score,
 
         feedback:
-          isCorrect
-            ? "Correct!"
-            : "Not quite.",
+          savedAnswer.feedback,
 
         explanation:
-          question.explanation ??
-          "Review the related material.",
+          question.explanation,
       },
 
-      mastery,
+      mastery:
+        masteryResult,
 
       progress: {
         answered:
-          answeredCount,
+          totalAnswers,
 
         total:
-          totalQuestions,
+          totalQuestions ??
+          0,
 
-        complete:
-          isComplete,
+        complete,
 
         score:
-          finalScore,
+          Number(
+            averageScore.toFixed(
+              2
+            )
+          ),
       },
     });
   } catch (error) {
@@ -463,220 +724,11 @@ export async function POST(
         error:
           error instanceof Error
             ? error.message
-            : "Could not submit answer.",
+            : "Could not submit quiz answer.",
       },
       {
         status: 500,
       }
     );
   }
-}
-
-function normalizeAnswer(
-  value: string
-): string {
-  return value
-    .trim()
-    .replace(/\s+/g, " ")
-    .toLowerCase();
-}
-
-async function updateConceptMastery({
-  supabase,
-  userId,
-  projectId,
-  conceptId,
-  score,
-  isCorrect,
-}: {
-  supabase: Awaited<
-    ReturnType<typeof createClient>
-  >;
-  userId: string;
-  projectId: string;
-  conceptId: string;
-  score: number;
-  isCorrect: boolean;
-}) {
-  const {
-    data: existing,
-    error:
-      existingError,
-  } =
-    await supabase
-      .from("concept_mastery")
-      .select(
-        `
-          id,
-          mastery_score,
-          confidence,
-          attempt_count,
-          correct_count
-        `
-      )
-      .eq(
-        "user_id",
-        userId
-      )
-      .eq(
-        "project_id",
-        projectId
-      )
-      .eq(
-        "concept_id",
-        conceptId
-      )
-      .maybeSingle();
-
-  if (existingError) {
-    throw existingError;
-  }
-
-  const oldMastery =
-    Number(
-      existing?.mastery_score ?? 0
-    );
-
-  /*
-   * PRD-style weighted mastery update:
-   *
-   * old × 0.7 + new score × 0.3
-   */
-  const newMastery =
-    oldMastery * 0.7 +
-    score * 0.3;
-
-  const attemptCount =
-    Number(
-      existing?.attempt_count ?? 0
-    ) + 1;
-
-  const correctCount =
-    Number(
-      existing?.correct_count ?? 0
-    ) +
-    (isCorrect ? 1 : 0);
-
-  const confidence =
-    Math.min(
-      100,
-      attemptCount * 15
-    );
-
-  let trend =
-    "stable";
-
-  if (
-    newMastery >
-    oldMastery + 2
-  ) {
-    trend = "improving";
-  } else if (
-    newMastery <
-    oldMastery - 2
-  ) {
-    trend = "declining";
-  }
-
-  const {
-    data,
-    error,
-  } =
-    await supabase
-      .from("concept_mastery")
-      .upsert(
-        {
-          user_id:
-            userId,
-
-          project_id:
-            projectId,
-
-          concept_id:
-            conceptId,
-
-          mastery_score:
-            Math.round(
-              newMastery * 100
-            ) / 100,
-
-          confidence:
-            Math.round(
-              confidence * 100
-            ) / 100,
-
-          attempt_count:
-            attemptCount,
-
-          correct_count:
-            correctCount,
-
-          last_assessed_at:
-            new Date().toISOString(),
-
-          trend,
-
-          updated_at:
-            new Date().toISOString(),
-        },
-        {
-          onConflict:
-            "user_id,project_id,concept_id",
-        }
-      )
-      .select(
-        `
-          mastery_score,
-          confidence,
-          attempt_count,
-          correct_count,
-          trend
-        `
-      )
-      .single();
-
-  if (error) {
-    throw error;
-  }
-
-  await supabase
-    .from("activity_events")
-    .insert({
-      user_id:
-        userId,
-
-      project_id:
-        projectId,
-
-      event_type:
-        "MASTERY_UPDATED",
-
-      metadata: {
-        conceptId,
-        oldMastery,
-        newMastery:
-          data.mastery_score,
-        score,
-      },
-    });
-
-  return {
-    oldScore:
-      Math.round(
-        oldMastery * 100
-      ) / 100,
-
-    newScore:
-      Number(
-        data.mastery_score
-      ),
-
-    confidence:
-      Number(
-        data.confidence
-      ),
-
-    trend:
-      data.trend,
-  };
 }

@@ -631,7 +631,7 @@ export default function QuizPage({
             Back to project
           </Link>
 
-          <div className="mt-8">
+          <header className="mt-8">
             <p className="text-sm font-medium text-muted-foreground">
               Quiz
             </p>
@@ -645,7 +645,24 @@ export default function QuizPage({
                 {session.learningGoal}
               </p>
             )}
-          </div>
+
+            <div className="mt-6 flex gap-3">
+              <Link
+                href={`/projects/${projectId}/quiz`}
+                className="rounded-xl border px-5 py-3 text-sm font-medium transition hover:bg-muted"
+              >
+                Multiple choice
+              </Link>
+
+              <Link
+                href={`/projects/${projectId}/quiz/open-ended`}
+                className="rounded-xl bg-foreground px-5 py-3 text-sm font-medium text-background transition hover:opacity-90"
+              >
+                Open-ended test
+              </Link>
+            </div>
+          </header>
+        
         </header>
 
         <div className="mt-10">
