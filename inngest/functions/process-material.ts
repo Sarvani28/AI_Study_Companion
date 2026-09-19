@@ -1,72 +1,56 @@
-import OpenAI from "openai";
+import { inngest } from "@/inngest/client";
+import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  generateChatResponse,
+  generateEmbedding,
+} from "@/lib/ai/ollama";
 import {
   extractText,
   getDocumentProxy,
 } from "unpdf";
 
-import { inngest } from "../client";
-import { createAdminClient } from "@/lib/supabase/admin";
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-const EMBEDDING_MODEL =
-  "text-embedding-3-small";
-
-const CONCEPT_MODEL =
-  "gpt-4o-mini";
-
-const CHUNK_SIZE = 1400;
-const CHUNK_OVERLAP = 250;
-
-type MaterialEventData = {
-  materialId: string;
-  projectId: string;
-  userId: string;
-};
-
-type PageText = {
+type PdfPage = {
   pageNumber: number;
   text: string;
 };
 
 type DocumentChunk = {
   content: string;
-  pageNumber: number | null;
+  pageNumber: number;
   chunkIndex: number;
 };
 
-type ExtractedConcept = {
+type Concept = {
   name: string;
   description: string;
 };
 
-function normalizeText(
-  text: string,
-): string {
+/**
+ * Normalize extracted PDF text.
+ */
+function normalizeText(text: string): string {
   return text
-    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "")
     .replace(/[ \t]+/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
 
-/*
- * Build chunks while preserving page numbers.
- *
- * This is important for our later RAG citations.
+/**
+ * Split PDF pages into overlapping chunks.
  */
 function buildChunks(
-  pages: PageText[],
+  pages: PdfPage[]
 ): DocumentChunk[] {
   const chunks: DocumentChunk[] = [];
+
+  const chunkSize = 1400;
+  const overlap = 250;
 
   let chunkIndex = 0;
 
   for (const page of pages) {
-    const text =
-      normalizeText(page.text);
+    const text = normalizeText(page.text);
 
     if (!text) {
       continue;
@@ -76,19 +60,18 @@ function buildChunks(
 
     while (start < text.length) {
       const end = Math.min(
-        start + CHUNK_SIZE,
-        text.length,
+        start + chunkSize,
+        text.length
       );
 
       const content = text
         .slice(start, end)
         .trim();
 
-      if (content.length > 0) {
+      if (content) {
         chunks.push({
           content,
-          pageNumber:
-            page.pageNumber,
+          pageNumber: page.pageNumber,
           chunkIndex,
         });
 
@@ -99,154 +82,229 @@ function buildChunks(
         break;
       }
 
-      start = Math.max(
-        end - CHUNK_OVERLAP,
-        start + 1,
-      );
+      start = end - overlap;
     }
   }
 
   return chunks;
 }
 
+/**
+ * Parse concepts returned by Ollama.
+ */
+function parseConcepts(
+  response: string
+): Concept[] {
+  const cleaned = response
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+
+  try {
+    const parsed = JSON.parse(cleaned);
+
+    if (!Array.isArray(parsed?.concepts)) {
+      return [];
+    }
+
+    return parsed.concepts
+      .filter((concept: unknown) => {
+        if (
+          typeof concept !== "object" ||
+          concept === null
+        ) {
+          return false;
+        }
+
+        const item =
+          concept as Record<string, unknown>;
+
+        return (
+          typeof item.name === "string" &&
+          typeof item.description === "string"
+        );
+      })
+      .slice(0, 15)
+      .map(
+        (
+          concept: {
+            name: string;
+            description: string;
+          }
+        ) => ({
+          name: concept.name
+            .trim()
+            .slice(0, 200),
+
+          description: concept.description
+            .trim()
+            .slice(0, 500),
+        })
+      );
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Process uploaded PDF.
+ *
+ * Pipeline:
+ *
+ * Upload
+ * ↓
+ * Supabase Storage
+ * ↓
+ * Inngest
+ * ↓
+ * PDF text extraction
+ * ↓
+ * Chunking
+ * ↓
+ * Ollama embeddings
+ * ↓
+ * pgvector
+ * ↓
+ * Concept extraction
+ * ↓
+ * Ready
+ */
 export const processMaterial =
   inngest.createFunction(
     {
       id: "process-material",
 
-      retries: 3,
-
       triggers: {
         event: "material/uploaded",
       },
+
+      retries: 3,
     },
 
     async ({ event, step }) => {
-      const eventData =
-        event.data as MaterialEventData;
-
       const {
         materialId,
         projectId,
         userId,
-      } = eventData;
+      } = event.data;
 
       /*
-       * Server-side Supabase admin client.
-       */
-      const supabaseAdmin =
-        createAdminClient();
-
-      /*
+       * --------------------------------------------------
        * STEP 1
-       *
-       * Load material.
+       * Load material
+       * --------------------------------------------------
        */
+
       const material =
         await step.run(
           "load-material",
           async () => {
+            const supabase =
+              createAdminClient();
+
             const { data, error } =
-              await supabaseAdmin
+              await supabase
                 .from("materials")
-                .select("*")
+                .select(
+                  `
+                    id,
+                    project_id,
+                    user_id,
+                    filename,
+                    storage_path,
+                    status
+                  `
+                )
                 .eq(
                   "id",
-                  materialId,
+                  materialId
                 )
                 .eq(
                   "project_id",
-                  projectId,
+                  projectId
                 )
                 .eq(
                   "user_id",
-                  userId,
+                  userId
                 )
                 .single();
 
             if (error) {
-              throw new Error(
-                `Failed to load material: ${error.message}`,
-              );
+              throw error;
             }
 
             if (!data) {
               throw new Error(
-                "Material was not found.",
+                "Material not found."
               );
             }
 
             return data;
-          },
+          }
         );
 
       /*
+       * --------------------------------------------------
        * STEP 2
-       *
-       * Mark material as processing.
+       * Mark material as processing
+       * --------------------------------------------------
        */
+
       await step.run(
         "mark-processing",
         async () => {
+          const supabase =
+            createAdminClient();
+
           const { error } =
-            await supabaseAdmin
+            await supabase
               .from("materials")
               .update({
                 status: "processing",
                 error_message: null,
+                updated_at:
+                  new Date().toISOString(),
               })
               .eq(
                 "id",
-                materialId,
-              )
-              .eq(
-                "project_id",
-                projectId,
-              )
-              .eq(
-                "user_id",
-                userId,
+                materialId
               );
 
           if (error) {
-            throw new Error(
-              `Failed to mark material as processing: ${error.message}`,
-            );
+            throw error;
           }
-        },
+        }
       );
 
       /*
+       * --------------------------------------------------
        * STEP 3
-       *
-       * Download PDF and extract
-       * page-by-page text.
-       *
-       * unpdf uses its serverless PDF.js
-       * build, so there is no separate
-       * pdf.worker.mjs file for Next.js
-       * to resolve.
+       * Download PDF and extract text
+       * --------------------------------------------------
        */
-      const extractedPdf =
+
+      const extracted =
         await step.run(
           "extract-pdf-text",
           async () => {
+            const supabase =
+              createAdminClient();
+
             const { data, error } =
-              await supabaseAdmin.storage
+              await supabase.storage
                 .from("materials")
                 .download(
-                  material.storage_path,
+                  material.storage_path
                 );
 
             if (error) {
-              throw new Error(
-                `Failed to download PDF: ${error.message}`,
-              );
+              throw error;
             }
 
             if (!data) {
               throw new Error(
-                "Supabase returned no PDF file.",
+                "Could not download PDF from Supabase Storage."
               );
             }
 
@@ -255,540 +313,487 @@ export const processMaterial =
 
             const pdfBytes =
               new Uint8Array(
-                arrayBuffer,
+                arrayBuffer
               );
 
             /*
-             * Create a PDF document proxy.
+             * Create PDF document.
              */
             const pdf =
               await getDocumentProxy(
-                pdfBytes,
+                pdfBytes
               );
 
             /*
-             * Extract text from every page.
+             * IMPORTANT:
              *
-             * mergePages=false means we receive
-             * an array where each item represents
-             * one page.
+             * extractText() returns:
+             *
+             * {
+             *   totalPages,
+             *   text
+             * }
+             *
+             * When mergePages=false,
+             * text is string[].
              */
-            const result =
+            const {
+              totalPages,
+              text,
+            } =
               await extractText(
                 pdf,
                 {
                   mergePages: false,
-                },
+                }
               );
 
-            const pageTexts =
-              Array.isArray(result.text)
-                ? result.text
-                : [result.text];
+            /*
+             * Make absolutely sure we received
+             * per-page text.
+             */
+            if (
+              !Array.isArray(text)
+            ) {
+              throw new Error(
+                "PDF extraction did not return per-page text."
+              );
+            }
 
-            const pages: PageText[] =
-              pageTexts.map(
+            const normalizedPages: PdfPage[] =
+              text.map(
                 (
                   pageText,
-                  index,
+                  index
                 ) => ({
                   pageNumber:
                     index + 1,
 
                   text:
-                    normalizeText(
-                      pageText,
-                    ),
-                }),
+                    typeof pageText ===
+                    "string"
+                      ? pageText
+                      : String(
+                          pageText
+                        ),
+                })
               );
-
-            const usablePages =
-              pages.filter(
-                (page) =>
-                  page.text.length > 0,
-              );
-
-            if (
-              usablePages.length === 0
-            ) {
-              throw new Error(
-                "The PDF contains no extractable text.",
-              );
-            }
 
             return {
               pageCount:
-                result.totalPages,
+                totalPages,
 
               pages:
-                usablePages,
-
-              fullText:
-                usablePages
-                  .map(
-                    (page) =>
-                      page.text,
-                  )
-                  .join("\n\n"),
+                normalizedPages,
             };
-          },
+          }
         );
 
       /*
+       * --------------------------------------------------
        * STEP 4
-       *
-       * Save page count.
+       * Save page count
+       * --------------------------------------------------
        */
+
       await step.run(
         "update-page-count",
         async () => {
+          const supabase =
+            createAdminClient();
+
           const { error } =
-            await supabaseAdmin
+            await supabase
               .from("materials")
               .update({
                 page_count:
-                  extractedPdf.pageCount,
+                  extracted.pageCount,
+
+                updated_at:
+                  new Date().toISOString(),
               })
               .eq(
                 "id",
-                materialId,
-              )
-              .eq(
-                "project_id",
-                projectId,
-              )
-              .eq(
-                "user_id",
-                userId,
+                materialId
               );
 
           if (error) {
-            throw new Error(
-              `Failed to update page count: ${error.message}`,
-            );
+            throw error;
           }
-        },
+        }
       );
 
       /*
+       * --------------------------------------------------
        * STEP 5
-       *
-       * Chunk the PDF while retaining
-       * page numbers.
+       * Create chunks
+       * --------------------------------------------------
        */
+
       const chunks =
         await step.run(
           "chunk-document",
           async () => {
             return buildChunks(
-              extractedPdf.pages,
+              extracted.pages
             );
-          },
+          }
         );
 
       if (chunks.length === 0) {
         throw new Error(
-          "No chunks were generated from the PDF.",
+          "No readable text was found in this PDF."
         );
       }
 
       /*
+       * --------------------------------------------------
        * STEP 6
-       *
-       * Delete existing chunks.
+       * Remove old chunks
+       * --------------------------------------------------
        */
+
       await step.run(
         "clear-existing-chunks",
         async () => {
+          const supabase =
+            createAdminClient();
+
           const { error } =
-            await supabaseAdmin
-              .from(
-                "document_chunks",
-              )
+            await supabase
+              .from("document_chunks")
               .delete()
               .eq(
                 "material_id",
-                materialId,
-              )
-              .eq(
-                "project_id",
-                projectId,
-              )
-              .eq(
-                "user_id",
-                userId,
+                materialId
               );
 
           if (error) {
-            throw new Error(
-              `Failed to clear existing chunks: ${error.message}`,
-            );
+            throw error;
           }
-        },
+        }
       );
 
       /*
+       * --------------------------------------------------
        * STEP 7
+       * Generate local embeddings
        *
-       * Generate embeddings.
-       */
-      const embeddedChunks =
-        await step.run(
-          "generate-embeddings",
-          async () => {
-            const results: Array<
-              DocumentChunk & {
-                embedding: number[];
-              }
-            > = [];
-
-            const batchSize = 50;
-
-            for (
-              let i = 0;
-              i < chunks.length;
-              i += batchSize
-            ) {
-              const batch =
-                chunks.slice(
-                  i,
-                  i + batchSize,
-                );
-
-              const response =
-                await openai.embeddings.create(
-                  {
-                    model:
-                      EMBEDDING_MODEL,
-
-                    input:
-                      batch.map(
-                        (chunk) =>
-                          chunk.content,
-                      ),
-                  },
-                );
-
-              for (
-                let j = 0;
-                j < batch.length;
-                j += 1
-              ) {
-                const embedding =
-                  response.data[j]
-                    ?.embedding;
-
-                if (!embedding) {
-                  throw new Error(
-                    `Missing embedding for chunk ${i + j}.`,
-                  );
-                }
-
-                results.push({
-                  ...batch[j],
-                  embedding,
-                });
-              }
-            }
-
-            return results;
-          },
-        );
-
-      /*
-       * STEP 8
+       * Ollama:
+       * nomic-embed-text
        *
-       * Insert document chunks.
+       * Dimension:
+       * 768
+       * --------------------------------------------------
        */
+
       await step.run(
-        "insert-document-chunks",
+        "generate-and-store-embeddings",
         async () => {
-          const batchSize = 100;
+          const supabase =
+            createAdminClient();
+
+          const batchSize = 10;
 
           for (
             let i = 0;
-            i <
-            embeddedChunks.length;
+            i < chunks.length;
             i += batchSize
           ) {
             const batch =
-              embeddedChunks.slice(
+              chunks.slice(
                 i,
-                i + batchSize,
+                i + batchSize
               );
 
-            const rows =
-              batch.map(
-                (chunk) => ({
-                  material_id:
-                    materialId,
+            const rows = [];
 
-                  project_id:
-                    projectId,
+            for (const chunk of batch) {
+              const embedding =
+                await generateEmbedding(
+                  `search_document: ${chunk.content}`
+                );
 
-                  user_id:
-                    userId,
+              if (
+                embedding.length !==
+                768
+              ) {
+                throw new Error(
+                  `Invalid embedding dimension. Expected 768, received ${embedding.length}.`
+                );
+              }
 
-                  content:
-                    chunk.content,
+              rows.push({
+                material_id:
+                  materialId,
 
-                  page_number:
+                project_id:
+                  projectId,
+
+                user_id:
+                  userId,
+
+                content:
+                  chunk.content,
+
+                page_number:
+                  chunk.pageNumber,
+
+                chunk_index:
+                  chunk.chunkIndex,
+
+                embedding,
+
+                metadata: {
+                  filename:
+                    material.filename,
+
+                  page:
                     chunk.pageNumber,
-
-                  chunk_index:
-                    chunk.chunkIndex,
-
-                  embedding:
-                    chunk.embedding,
-
-                  metadata: {
-                    filename:
-                      material.filename,
-
-                    page:
-                      chunk.pageNumber,
-                  },
-                }),
-              );
+                },
+              });
+            }
 
             const { error } =
-              await supabaseAdmin
+              await supabase
                 .from(
-                  "document_chunks",
+                  "document_chunks"
                 )
                 .insert(rows);
 
             if (error) {
-              throw new Error(
-                `Failed to insert document chunks: ${error.message}`,
-              );
+              throw error;
             }
           }
-        },
+        }
       );
 
       /*
-       * STEP 9
-       *
-       * Extract concepts.
+       * --------------------------------------------------
+       * STEP 8
+       * Extract concepts using Ollama
+       * --------------------------------------------------
        */
+
       const concepts =
         await step.run(
           "extract-concepts",
           async () => {
-            const textForConcepts =
-              extractedPdf.fullText.slice(
-                0,
-                12000,
-              );
+            const combinedText =
+              chunks
+                .slice(0, 20)
+                .map(
+                  (chunk) =>
+                    chunk.content
+                )
+                .join("\n\n");
+
+            if (!combinedText) {
+              return [];
+            }
 
             const response =
-              await openai.chat.completions.create(
-                {
-                  model:
-                    CONCEPT_MODEL,
+              await generateChatResponse(
+                [
+                  {
+                    role: "system",
 
-                  temperature: 0,
+                    content: `
+You are an educational concept extractor.
 
-                  response_format: {
-                    type: "json_schema",
+Read the supplied study material and identify
+important concepts that a student should learn.
 
-                    json_schema: {
-                      name:
-                        "concept_extraction",
+Return JSON only.
 
-                      strict: true,
+Use exactly this structure:
 
-                      schema: {
-                        type: "object",
+{
+  "concepts": [
+    {
+      "name": "Concept name",
+      "description": "Short educational description"
+    }
+  ]
+}
 
-                        properties: {
-                          concepts: {
-                            type: "array",
+Rules:
 
-                            items: {
-                              type: "object",
-
-                              properties: {
-                                name: {
-                                  type: "string",
-                                },
-
-                                description: {
-                                  type: "string",
-                                },
-                              },
-
-                              required: [
-                                "name",
-                                "description",
-                              ],
-
-                              additionalProperties:
-                                false,
-                            },
-                          },
-                        },
-
-                        required: [
-                          "concepts",
-                        ],
-
-                        additionalProperties:
-                          false,
-                      },
-                    },
+- Return at most 15 concepts.
+- Only use concepts actually present in the material.
+- Do not invent information.
+- Keep names short.
+- Keep descriptions concise.
+`,
                   },
 
-                  messages: [
-                    {
-                      role: "system",
+                  {
+                    role: "user",
 
-                      content:
-                        "Extract the most important learning concepts from the provided study material. Return concise educational concepts only.",
-                    },
-
-                    {
-                      role: "user",
-
-                      content:
-                        textForConcepts,
-                    },
-                  ],
-                },
+                    content:
+                      combinedText,
+                  },
+                ]
               );
 
-            const content =
-              response.choices[0]
-                ?.message
-                ?.content;
-
-            if (!content) {
-              return [] as ExtractedConcept[];
-            }
-
-            let parsed: {
-              concepts: ExtractedConcept[];
-            };
-
-            try {
-              parsed =
-                JSON.parse(
-                  content,
-                ) as {
-                  concepts: ExtractedConcept[];
-                };
-            } catch {
-              throw new Error(
-                "The concept extraction model returned invalid JSON.",
-              );
-            }
-
-            return parsed.concepts;
-          },
+            return parseConcepts(
+              response
+            );
+          }
         );
 
       /*
-       * STEP 10
-       *
-       * Store concepts.
+       * --------------------------------------------------
+       * STEP 9
+       * Store concepts
+       * --------------------------------------------------
        */
+
       await step.run(
         "store-concepts",
         async () => {
-          if (
-            concepts.length === 0
-          ) {
-            return;
+          const supabase =
+            createAdminClient();
+
+          for (const concept of concepts) {
+            const {
+              error,
+            } =
+              await supabase
+                .from("concepts")
+                .upsert(
+                  {
+                    project_id:
+                      projectId,
+
+                    name:
+                      concept.name,
+
+                    description:
+                      concept.description,
+                  },
+                  {
+                    onConflict:
+                      "project_id,name",
+                  }
+                );
+
+            if (error) {
+              throw error;
+            }
           }
-
-          const rows =
-            concepts.map(
-              (concept) => ({
-                project_id:
-                  projectId,
-
-                name:
-                  concept.name.trim(),
-
-                description:
-                  concept.description.trim(),
-              }),
-            );
-
-          const { error } =
-            await supabaseAdmin
-              .from("concepts")
-              .upsert(
-                rows,
-                {
-                  onConflict:
-                    "project_id,name",
-                },
-              );
-
-          if (error) {
-            throw new Error(
-              `Failed to store concepts: ${error.message}`,
-            );
-          }
-        },
+        }
       );
 
       /*
-       * STEP 11
-       *
-       * Mark material ready.
+       * --------------------------------------------------
+       * STEP 10
+       * Mark material ready
+       * --------------------------------------------------
        */
+
       await step.run(
         "mark-ready",
         async () => {
+          const supabase =
+            createAdminClient();
+
           const { error } =
-            await supabaseAdmin
+            await supabase
               .from("materials")
               .update({
                 status: "ready",
-                error_message: null,
+
+                error_message:
+                  null,
+
+                updated_at:
+                  new Date().toISOString(),
               })
               .eq(
                 "id",
-                materialId,
-              )
-              .eq(
-                "project_id",
-                projectId,
-              )
-              .eq(
-                "user_id",
-                userId,
+                materialId
               );
 
           if (error) {
-            throw new Error(
-              `Failed to mark material as ready: ${error.message}`,
-            );
+            throw error;
           }
-        },
+        }
       );
 
       /*
-       * Final result.
+       * --------------------------------------------------
+       * STEP 11
+       * Record activity
+       * --------------------------------------------------
        */
+
+      await step.run(
+        "record-material-processed",
+        async () => {
+          const supabase =
+            createAdminClient();
+
+          const { error } =
+            await supabase
+              .from(
+                "activity_events"
+              )
+              .insert({
+                user_id:
+                  userId,
+
+                project_id:
+                  projectId,
+
+                event_type:
+                  "MATERIAL_PROCESSED",
+
+                metadata: {
+                  materialId,
+
+                  filename:
+                    material.filename,
+
+                  pageCount:
+                    extracted.pageCount,
+
+                  chunkCount:
+                    chunks.length,
+
+                  conceptCount:
+                    concepts.length,
+                },
+              });
+
+          if (error) {
+            throw error;
+          }
+        }
+      );
+
+      /*
+       * --------------------------------------------------
+       * DONE
+       * --------------------------------------------------
+       */
+
       return {
         success: true,
 
         materialId,
 
-        projectId,
+        filename:
+          material.filename,
 
         pageCount:
-          extractedPdf.pageCount,
+          extracted.pageCount,
 
         chunkCount:
-          embeddedChunks.length,
+          chunks.length,
 
         conceptCount:
           concepts.length,
       };
-    },
+    }
   );

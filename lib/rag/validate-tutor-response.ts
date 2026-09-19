@@ -1,22 +1,11 @@
-import type {
-  RagChunk,
-} from "./search";
-
-import type {
-  TutorResponse,
-} from "@/lib/validation/tutor";
+import type { TutorResponse } from "@/lib/validation/tutor";
+import type { RagChunk } from "./search";
 
 export function validateTutorCitations(
   response: TutorResponse,
-  chunks: RagChunk[],
+  chunks: RagChunk[]
 ): TutorResponse {
-  /*
-   * If the model says there is insufficient
-   * evidence, don't allow citations through.
-   */
-  if (
-    response.insufficientEvidence
-  ) {
+  if (response.insufficientEvidence) {
     return {
       ...response,
       grounded: false,
@@ -24,36 +13,27 @@ export function validateTutorCitations(
     };
   }
 
-  const validCitations =
-    response.citations.filter(
-      (citation) => {
-        const matchingChunks =
-          chunks.filter(
-            (chunk) =>
-              chunk.materialId ===
-                citation.materialId &&
-              chunk.filename ===
-                citation.materialName &&
-              (
-                citation.pageNumber ===
-                  null ||
-                chunk.pageNumber ===
-                  citation.pageNumber
-              ),
-          );
+  const validCitations = response.citations.filter(
+    (citation) => {
+      return chunks.some((chunk) => {
+        const sameMaterial =
+          chunk.materialId === citation.materialId;
+
+        const sameName =
+          chunk.materialName === citation.materialName;
+
+        const samePage =
+          chunk.pageNumber === citation.pageNumber;
 
         return (
-          matchingChunks.length > 0
+          sameMaterial &&
+          sameName &&
+          samePage
         );
-      },
-    );
+      });
+    }
+  );
 
-  /*
-   * If the model claimed grounded evidence
-   * but none of its citations match the
-   * retrieved sources, don't treat the answer
-   * as grounded.
-   */
   if (
     response.grounded &&
     validCitations.length === 0

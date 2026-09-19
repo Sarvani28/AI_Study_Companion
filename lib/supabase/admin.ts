@@ -1,32 +1,36 @@
 import { createClient } from "@supabase/supabase-js";
 
 export function createAdminClient() {
-  const supabaseUrl =
-    process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const url =
+    process.env
+      .NEXT_PUBLIC_SUPABASE_URL;
 
-  const supabaseSecretKey =
-    process.env.SUPABASE_SECRET_KEY;
+  const secretKey =
+    process.env
+      .SUPABASE_SECRET_KEY;
 
-  if (!supabaseUrl) {
+  if (!url) {
     throw new Error(
-      "NEXT_PUBLIC_SUPABASE_URL is missing.",
+      "NEXT_PUBLIC_SUPABASE_URL is missing."
     );
   }
 
-  if (!supabaseSecretKey) {
+  if (!secretKey) {
     throw new Error(
-      "SUPABASE_SECRET_KEY is missing.",
+      "SUPABASE_SECRET_KEY is missing."
     );
   }
 
   return createClient(
-    supabaseUrl,
-    supabaseSecretKey,
+    url,
+    secretKey,
     {
       auth: {
-        autoRefreshToken: false,
-        persistSession: false,
+        autoRefreshToken:
+          false,
+        persistSession:
+          false,
       },
-    },
+    }
   );
 }

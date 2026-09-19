@@ -4,7 +4,7 @@ export const tutorCitationSchema = z.object({
   materialId: z.string().uuid(),
   materialName: z.string(),
   pageNumber: z.number().int().positive().nullable(),
-  quote: z.string().optional(),
+  quote: z.string(),
 });
 
 export const tutorResponseSchema = z.object({

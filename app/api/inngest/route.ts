@@ -1,9 +1,18 @@
 import { serve } from "inngest/next";
 
 import { inngest } from "@/inngest/client";
-import { processMaterial } from "@/inngest/functions/process-material";
 
-export const { GET, POST, PUT } = serve({
+import {
+  processMaterial,
+} from "@/inngest/functions/process-material";
+
+export const {
+  GET,
+  POST,
+  PUT,
+} = serve({
   client: inngest,
-  functions: [processMaterial],
+  functions: [
+    processMaterial,
+  ],
 });
