@@ -17,6 +17,7 @@ import {
   FileText,
   Loader2,
   MoreHorizontal,
+  Trash2,
   Upload,
 } from "lucide-react";
 
@@ -174,6 +175,20 @@ export default function MaterialsPage({
 
   const [error, setError] =
     useState("");
+
+  /*
+   * ID of the material whose
+   * three-dot menu is currently open.
+   */
+  const [openMenuId, setOpenMenuId] =
+    useState<string | null>(null);
+
+  /*
+   * ID of the material currently
+   * being deleted.
+   */
+  const [deletingId, setDeletingId] =
+    useState<string | null>(null);
 
   /*
    * ----------------------------------------------------------
@@ -400,6 +415,110 @@ export default function MaterialsPage({
 
   /*
    * ----------------------------------------------------------
+   * DELETE MATERIAL
+   * ----------------------------------------------------------
+   */
+
+  async function deleteMaterial(
+    material: Material,
+  ) {
+    /*
+     * Ask for confirmation before deleting.
+     */
+
+    const confirmed =
+      window.confirm(
+        `Delete "${material.filename}"?\n\nThis action cannot be undone.`,
+      );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setDeletingId(material.id);
+      setError("");
+
+      /*
+       * Close the three-dot menu.
+       */
+      setOpenMenuId(null);
+
+      const supabase =
+        createClient();
+
+      /*
+       * Make sure the user is logged in.
+       */
+
+      const {
+        data: { user },
+        error: userError,
+      } =
+        await supabase.auth.getUser();
+
+      if (userError || !user) {
+        window.location.href =
+          "/login";
+        return;
+      }
+
+      /*
+       * Delete the material row.
+       *
+       * project_id and user_id checks prevent
+       * deleting another user's material.
+       */
+
+      const {
+        error: deleteError,
+      } = await supabase
+        .from("materials")
+        .delete()
+        .eq("id", material.id)
+        .eq(
+          "project_id",
+          projectId,
+        )
+        .eq(
+          "user_id",
+          user.id,
+        );
+
+      if (deleteError) {
+        throw deleteError;
+      }
+
+      /*
+       * Immediately remove it from the UI.
+       */
+
+      setMaterials(
+        (currentMaterials) =>
+          currentMaterials.filter(
+            (item) =>
+              item.id !==
+              material.id,
+          ),
+      );
+    } catch (err) {
+      console.error(
+        "Delete material error:",
+        err,
+      );
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to delete material.",
+      );
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  /*
+   * ----------------------------------------------------------
    * AUTO REFRESH
    * ----------------------------------------------------------
    */
@@ -408,7 +527,8 @@ export default function MaterialsPage({
     const hasActiveMaterials =
       materials.some(
         (material) =>
-          material.status === "queued" ||
+          material.status ===
+            "queued" ||
           material.status ===
             "processing",
       );
@@ -431,6 +551,32 @@ export default function MaterialsPage({
       );
     };
   }, [materials]);
+
+  /*
+   * ----------------------------------------------------------
+   * CLOSE MENU WHEN CLICKING OUTSIDE
+   * ----------------------------------------------------------
+   */
+
+  useEffect(() => {
+    function handleDocumentClick() {
+      setOpenMenuId(null);
+    }
+
+    if (openMenuId) {
+      document.addEventListener(
+        "click",
+        handleDocumentClick,
+      );
+    }
+
+    return () => {
+      document.removeEventListener(
+        "click",
+        handleDocumentClick,
+      );
+    };
+  }, [openMenuId]);
 
   /*
    * ----------------------------------------------------------
@@ -510,20 +656,24 @@ export default function MaterialsPage({
   const readyCount =
     materials.filter(
       (material) =>
-        material.status === "ready",
+        material.status ===
+        "ready",
     ).length;
 
   const processingCount =
     materials.filter(
       (material) =>
-        material.status === "processing" ||
-        material.status === "queued",
+        material.status ===
+          "processing" ||
+        material.status ===
+          "queued",
     ).length;
 
   const failedCount =
     materials.filter(
       (material) =>
-        material.status === "failed",
+        material.status ===
+        "failed",
     ).length;
 
   /*
@@ -728,6 +878,14 @@ export default function MaterialsPage({
                       material.status,
                     );
 
+                  const isDeleting =
+                    deletingId ===
+                    material.id;
+
+                  const isMenuOpen =
+                    openMenuId ===
+                    material.id;
+
                   return (
                     <article
                       key={material.id}
@@ -781,13 +939,72 @@ export default function MaterialsPage({
                           </div>
                         </div>
 
-                        <button
-                          type="button"
-                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-400 opacity-0 transition hover:bg-gray-100 hover:text-gray-700 group-hover:opacity-100"
-                          aria-label="Material options"
+                        {/* =================================================
+                            THREE DOT MENU
+                        ================================================== */}
+
+                        <div
+                          className="relative shrink-0"
+                          onClick={(event) =>
+                            event.stopPropagation()
+                          }
                         >
-                          <MoreHorizontal className="h-4 w-4" />
-                        </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setOpenMenuId(
+                                isMenuOpen
+                                  ? null
+                                  : material.id,
+                              )
+                            }
+                            disabled={
+                              isDeleting
+                            }
+                            className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            aria-label="Material options"
+                            aria-expanded={
+                              isMenuOpen
+                            }
+                          >
+                            {isDeleting ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <MoreHorizontal className="h-4 w-4" />
+                            )}
+                          </button>
+
+                          {/* =================================================
+                              DROPDOWN MENU
+                          ================================================== */}
+
+                          {isMenuOpen ? (
+                            <div className="absolute right-0 top-10 z-50 w-40 overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  deleteMaterial(
+                                    material,
+                                  )
+                                }
+                                disabled={
+                                  isDeleting
+                                }
+                                className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {isDeleting ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Trash2 className="h-4 w-4" />
+                                )}
+
+                                {isDeleting
+                                  ? "Deleting..."
+                                  : "Delete"}
+                              </button>
+                            </div>
+                          ) : null}
+                        </div>
                       </div>
 
                       {/* Status */}

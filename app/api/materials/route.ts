@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-
+import { inngest } from "@/inngest/client";
 import { createClient } from "@/lib/supabase/server";
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
@@ -298,6 +298,55 @@ export async function POST(request: Request) {
         },
       );
     }
+    /*
+        * ==========================================================
+        * TRIGGER BACKGROUND PROCESSING
+        * ==========================================================
+        */
+
+        try {
+        await inngest.send({
+            name: "material/uploaded",
+
+            data: {
+            materialId: material.id,
+            projectId,
+            userId: user.id,
+            },
+        });
+        } catch (eventError) {
+        console.error(
+            "Unable to send material processing event:",
+            eventError,
+        );
+
+        /*
+        * Keep the material record so the failure is visible
+        * rather than silently deleting the uploaded document.
+        */
+
+        await supabase
+            .from("materials")
+            .update({
+            status: "failed",
+            error_message:
+                "The material was uploaded, but background processing could not be started.",
+            })
+            .eq(
+            "id",
+            material.id,
+            );
+
+        return NextResponse.json(
+            {
+            error:
+                "The PDF was uploaded, but background processing could not be started.",
+            },
+            {
+            status: 500,
+            },
+        );
+        }
 
     /*
      * ==========================================================
