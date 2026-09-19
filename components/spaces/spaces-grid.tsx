@@ -35,17 +35,14 @@ export function SpacesGrid({
     <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
       {spaces.map((space) => (
         <SpaceCard
-            key={space.id}
-            id={space.id}
-            name={space.name}
-            description={space.description}
-            projectCount={space.projectCount}
-            averageMastery={space.averageMastery}
-            onDeleted={(deletedId) => {
-              // The parent will refresh the page/list.
-              window.location.reload();
-            }}
-          />
+          key={space.id}
+          id={space.id}
+          name={space.name}
+          description={space.description}
+          projectCount={space.projectCount}
+          averageMastery={space.averageMastery}
+          onDeleted={onDelete}
+        />
       ))}
     </div>
   );

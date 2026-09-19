@@ -1,320 +1,124 @@
-"use client";
+import Link from "next/link";
+import {
+  ArrowRight,
+  Brain,
+  FileText,
+  Sparkles,
+  Target,
+} from "lucide-react";
 
-import { useCallback, useEffect, useState } from "react";
-
-import { AppShell } from "@/components/layout/app-shell";
-import { CreateSpaceDialog } from "@/components/spaces/create-space-dialog";
-import { SpacesGrid } from "@/components/spaces/spaces-grid";
-import { createClient } from "@/lib/supabase/client";
-
-type Space = {
-  id: string;
-  name: string;
-  description: string | null;
-  projectCount: number;
-  averageMastery: number;
-};
-
-type Project = {
-  id: string;
-  space_id: string;
-};
-
-type MasteryRow = {
-  project_id: string;
-  mastery_score: number | string;
-};
-
-export default function SpacesPage() {
-  const [spaces, setSpaces] = useState<Space[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [error, setError] = useState("");
-
-  const loadSpaces = useCallback(async () => {
-    setLoading(true);
-    setError("");
-
-    try {
-      const supabase = createClient();
-
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
-
-      if (userError) {
-        throw userError;
-      }
-
-      if (!user) {
-        setError("You must be logged in to view your spaces.");
-        setSpaces([]);
-        return;
-      }
-
-      const { data: spacesData, error: spacesError } =
-        await supabase
-          .from("spaces")
-          .select("id, name, description")
-          .eq("user_id", user.id)
-          .order("created_at", {
-            ascending: false,
-          });
-
-      if (spacesError) {
-        throw spacesError;
-      }
-
-      const safeSpaces = spacesData ?? [];
-
-      const { data: projectsData, error: projectsError } =
-        await supabase
-          .from("projects")
-          .select("id, space_id")
-          .eq("user_id", user.id);
-
-      if (projectsError) {
-        throw projectsError;
-      }
-
-      const projects: Project[] = projectsData ?? [];
-
-      const projectIds = projects.map(
-        (project) => project.id
-      );
-
-      let masteryRows: MasteryRow[] = [];
-
-      if (projectIds.length > 0) {
-        const {
-          data: masteryData,
-          error: masteryError,
-        } = await supabase
-          .from("concept_mastery")
-          .select("project_id, mastery_score")
-          .in("project_id", projectIds)
-          .eq("user_id", user.id);
-
-        if (masteryError) {
-          throw masteryError;
-        }
-
-        masteryRows = masteryData ?? [];
-      }
-
-      const formattedSpaces: Space[] = safeSpaces.map(
-        (space) => {
-          const spaceProjects = projects.filter(
-            (project) =>
-              project.space_id === space.id
-          );
-
-          const spaceProjectIds = new Set(
-            spaceProjects.map(
-              (project) => project.id
-            )
-          );
-
-          const spaceMasteryRows =
-            masteryRows.filter((mastery) =>
-              spaceProjectIds.has(
-                mastery.project_id
-              )
-            );
-
-          const averageMastery =
-            spaceMasteryRows.length > 0
-              ? Math.round(
-                  spaceMasteryRows.reduce(
-                    (total, row) =>
-                      total +
-                      Number(
-                        row.mastery_score ?? 0
-                      ),
-                    0
-                  ) / spaceMasteryRows.length
-                )
-              : 0;
-
-          return {
-            id: space.id,
-            name: space.name,
-            description: space.description,
-            projectCount: spaceProjects.length,
-            averageMastery,
-          };
-        }
-      );
-
-      setSpaces(formattedSpaces);
-    } catch (error) {
-      console.error("Load spaces error:", error);
-
-      if (error instanceof Error) {
-        setError(error.message);
-      } else {
-        setError("Unable to load spaces.");
-      }
-
-      setSpaces([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const handleDeleteSpace = useCallback(
-  async (spaceId: string) => {
-    setError("");
-
-    try {
-      const supabase = createClient();
-
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
-
-      if (userError) {
-        throw new Error(
-          `Authentication error: ${userError.message}`,
-        );
-      }
-
-      if (!user) {
-        throw new Error(
-          "You must be logged in to delete a space.",
-        );
-      }
-
-      console.log("Deleting space:", {
-        spaceId,
-        userId: user.id,
-      });
-
-      const { data, error: deleteError } =
-        await supabase
-          .from("spaces")
-          .delete()
-          .eq("id", spaceId)
-          .eq("user_id", user.id)
-          .select("id");
-
-      console.log("Delete response:", {
-        data,
-        deleteError,
-      });
-
-      if (deleteError) {
-        throw new Error(
-          `Supabase delete failed: ${deleteError.message}`,
-        );
-      }
-
-      if (!data || data.length === 0) {
-        throw new Error(
-          "The space was not deleted. Supabase returned 0 deleted rows. Check the spaces DELETE RLS policy.",
-        );
-      }
-
-      setSpaces((currentSpaces) =>
-        currentSpaces.filter(
-          (space) => space.id !== spaceId,
-        ),
-      );
-
-      console.log(
-        "Space deleted successfully:",
-        spaceId,
-      );
-    } catch (error) {
-      console.error(
-        "DELETE SPACE ERROR:",
-        error,
-      );
-
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Unable to delete space.";
-
-      setError(message);
-
-      throw error;
-    }
+const features = [
+  {
+    icon: FileText,
+    title: "Learn from your materials",
+    description:
+      "Bring your study documents into one focused learning workspace.",
   },
-  [],
-);
+  {
+    icon: Sparkles,
+    title: "Ask an AI Tutor",
+    description:
+      "Get grounded explanations based on the materials you're studying.",
+  },
+  {
+    icon: Target,
+    title: "Practice intelligently",
+    description:
+      "Use quizzes and feedback to discover what you understand and what needs work.",
+  },
+  {
+    icon: Brain,
+    title: "Build mastery",
+    description:
+      "Track concepts over time and turn practice into measurable progress.",
+  },
+];
 
-  useEffect(() => {
-    void loadSpaces();
-  }, [loadSpaces]);
-
+export default function HomePage() {
   return (
-    <AppShell>
-      <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <div className="flex flex-col gap-8">
-          <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="mb-2 text-sm font-medium text-muted-foreground">
-                Workspace
-              </p>
+    <main className="min-h-screen overflow-hidden bg-[#f7f8fc]">
+      <div className="relative">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -left-40 -top-40 h-[32rem] w-[32rem] rounded-full bg-indigo-200/40 blur-3xl"
+        />
 
-              <h1 className="text-3xl font-semibold tracking-tight">
-                Your Spaces
-              </h1>
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -right-40 top-40 h-[30rem] w-[30rem] rounded-full bg-violet-200/30 blur-3xl"
+        />
 
-              <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
-                Organize your learning into focused workspaces.
-              </p>
+        <header className="relative z-10 mx-auto flex h-20 max-w-7xl items-center justify-between px-5 sm:px-8 lg:px-10">
+          <Link href="/" className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gray-950 text-white shadow-sm">
+              <Sparkles className="h-5 w-5" />
             </div>
 
-            <button
-              type="button"
-              onClick={() => setDialogOpen(true)}
-              className="inline-flex h-10 items-center justify-center rounded-lg bg-foreground px-4 text-sm font-medium text-background shadow-sm transition hover:opacity-90"
-            >
-              + New Space
-            </button>
+            <span className="text-lg font-semibold tracking-tight text-gray-950">
+              StudyAI
+            </span>
+          </Link>
+
+        </header>
+
+        <section className="relative z-10 mx-auto max-w-7xl px-5 pb-24 pt-20 text-center sm:px-8 lg:px-10 lg:pb-32 lg:pt-28">
+          <div className="mx-auto max-w-4xl">
+            <div className="mx-auto inline-flex items-center gap-2 rounded-full border border-indigo-100 bg-white/70 px-4 py-2 text-sm font-medium text-indigo-700 shadow-sm backdrop-blur">
+              <Sparkles className="h-4 w-4" />
+              Your intelligent learning companion
+            </div>
+
+            <h1 className="mt-7 text-5xl font-semibold leading-[1.02] tracking-[-0.055em] text-gray-950 sm:text-6xl lg:text-7xl">
+              Study with clarity.
+              <br />
+              <span className="text-indigo-600">
+                Learn with purpose.
+              </span>
+            </h1>
+
+            <p className="mx-auto mt-7 max-w-2xl text-base leading-7 text-gray-600 sm:text-lg sm:leading-8">
+              StudyAI brings your materials, AI tutoring, quizzes, mastery
+              tracking, and learning recommendations into one focused
+              experience.
+            </p>
+
+            <div className="mt-9 flex flex-col justify-center gap-3 sm:flex-row">
+              <Link
+                href="/signup"
+                className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-gray-950 px-6 text-sm font-semibold text-white shadow-lg shadow-gray-950/10 transition hover:bg-indigo-600"
+              >
+                Start learning
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            </div>
           </div>
 
-          {error && (
-            <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-              {error}
-            </div>
-          )}
+          <div className="mx-auto mt-20 grid max-w-5xl gap-4 text-left sm:grid-cols-2 lg:grid-cols-4">
+            {features.map((feature) => {
+              const Icon = feature.icon;
 
-          {loading ? (
-            <SpacesLoading />
-          ) : (
-            <SpacesGrid
-              spaces={spaces}
-              onDelete={handleDeleteSpace}
-            />
-          )}
-        </div>
-      </main>
+              return (
+                <div
+                  key={feature.title}
+                  className="rounded-2xl border border-gray-200 bg-white/80 p-5 shadow-sm backdrop-blur transition hover:-translate-y-0.5 hover:shadow-md"
+                >
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
+                    <Icon className="h-5 w-5" strokeWidth={1.8} />
+                  </div>
 
-      <CreateSpaceDialog
-        open={dialogOpen}
-        onClose={() => setDialogOpen(false)}
-        onCreated={() => {
-          void loadSpaces();
-        }}
-      />
-    </AppShell>
-  );
-}
+                  <h2 className="mt-5 text-sm font-semibold text-gray-950">
+                    {feature.title}
+                  </h2>
 
-function SpacesLoading() {
-  return (
-    <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-      {Array.from({ length: 3 }).map((_, index) => (
-        <div
-          key={index}
-          className="h-64 animate-pulse rounded-2xl border bg-muted/30"
-        />
-      ))}
-    </div>
+                  <p className="mt-2 text-sm leading-6 text-gray-500">
+                    {feature.description}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      </div>
+    </main>
   );
 }

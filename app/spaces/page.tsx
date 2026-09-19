@@ -38,11 +38,6 @@ export default function SpacesPage() {
     try {
       const supabase = createClient();
 
-      // --------------------------------------------------
-      // STEP 1:
-      // Get the currently authenticated user
-      // --------------------------------------------------
-
       const {
         data: { user },
         error: userError,
@@ -57,11 +52,6 @@ export default function SpacesPage() {
         setSpaces([]);
         return;
       }
-
-      // --------------------------------------------------
-      // STEP 2:
-      // Get spaces belonging to the current user
-      // --------------------------------------------------
 
       const { data: spacesData, error: spacesError } =
         await supabase
@@ -78,11 +68,6 @@ export default function SpacesPage() {
 
       const safeSpaces = spacesData ?? [];
 
-      // --------------------------------------------------
-      // STEP 3:
-      // Get projects belonging to the current user
-      // --------------------------------------------------
-
       const { data: projectsData, error: projectsError } =
         await supabase
           .from("projects")
@@ -94,11 +79,6 @@ export default function SpacesPage() {
       }
 
       const projects: Project[] = projectsData ?? [];
-
-      // --------------------------------------------------
-      // STEP 4:
-      // Get mastery records for the user's projects
-      // --------------------------------------------------
 
       const projectIds = projects.map(
         (project) => project.id
@@ -123,37 +103,35 @@ export default function SpacesPage() {
         masteryRows = masteryData ?? [];
       }
 
-      // --------------------------------------------------
-      // STEP 5:
-      // Build the data required by our SpaceCard component
-      // --------------------------------------------------
-
       const formattedSpaces: Space[] = safeSpaces.map(
         (space) => {
-          // Find all projects belonging to this space
           const spaceProjects = projects.filter(
-            (project) => project.space_id === space.id
+            (project) =>
+              project.space_id === space.id
           );
 
-          // Get project IDs for this particular space
           const spaceProjectIds = new Set(
-            spaceProjects.map((project) => project.id)
+            spaceProjects.map(
+              (project) => project.id
+            )
           );
 
-          // Find mastery records belonging to this space
-          const spaceMasteryRows = masteryRows.filter(
-            (mastery) =>
-              spaceProjectIds.has(mastery.project_id)
-          );
+          const spaceMasteryRows =
+            masteryRows.filter((mastery) =>
+              spaceProjectIds.has(
+                mastery.project_id
+              )
+            );
 
-          // Calculate average mastery
           const averageMastery =
             spaceMasteryRows.length > 0
               ? Math.round(
                   spaceMasteryRows.reduce(
                     (total, row) =>
                       total +
-                      Number(row.mastery_score ?? 0),
+                      Number(
+                        row.mastery_score ?? 0
+                      ),
                     0
                   ) / spaceMasteryRows.length
                 )
@@ -185,27 +163,66 @@ export default function SpacesPage() {
     }
   }, []);
 
-  // --------------------------------------------------
-  // Load spaces when the page first opens
-  // --------------------------------------------------
+  const handleDeleteSpace = useCallback(
+    async (spaceId: string) => {
+      setError("");
+
+      try {
+        const supabase = createClient();
+
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser();
+
+        if (userError) {
+          throw userError;
+        }
+
+        if (!user) {
+          throw new Error(
+            "You must be logged in to delete a space."
+          );
+        }
+
+        const { error: deleteError } =
+          await supabase
+            .from("spaces")
+            .delete()
+            .eq("id", spaceId)
+            .eq("user_id", user.id);
+
+        if (deleteError) {
+          throw deleteError;
+        }
+
+        await loadSpaces();
+      } catch (error) {
+        console.error(
+          "Delete space error:",
+          error
+        );
+
+        if (error instanceof Error) {
+          setError(error.message);
+        } else {
+          setError("Unable to delete space.");
+        }
+
+        throw error;
+      }
+    },
+    [loadSpaces]
+  );
 
   useEffect(() => {
     void loadSpaces();
   }, [loadSpaces]);
 
-  // --------------------------------------------------
-  // Page UI
-  // --------------------------------------------------
-
   return (
     <AppShell>
       <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         <div className="flex flex-col gap-8">
-
-          {/* -------------------------------------------
-              PAGE HEADER
-          -------------------------------------------- */}
-
           <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="mb-2 text-sm font-medium text-muted-foreground">
@@ -230,31 +247,22 @@ export default function SpacesPage() {
             </button>
           </div>
 
-          {/* -------------------------------------------
-              ERROR MESSAGE
-          -------------------------------------------- */}
-
           {error && (
             <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
               {error}
             </div>
           )}
 
-          {/* -------------------------------------------
-              LOADING / SPACES
-          -------------------------------------------- */}
-
           {loading ? (
             <SpacesLoading />
           ) : (
-            <SpacesGrid spaces={spaces} />
+            <SpacesGrid
+              spaces={spaces}
+              onDelete={handleDeleteSpace}
+            />
           )}
         </div>
       </main>
-
-      {/* ---------------------------------------------
-          CREATE SPACE DIALOG
-      ---------------------------------------------- */}
 
       <CreateSpaceDialog
         open={dialogOpen}
@@ -266,10 +274,6 @@ export default function SpacesPage() {
     </AppShell>
   );
 }
-
-// ----------------------------------------------------
-// Loading skeleton
-// ----------------------------------------------------
 
 function SpacesLoading() {
   return (
