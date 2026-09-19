@@ -131,7 +131,7 @@ export async function POST(
     if (chunks.length === 0) {
       const response: TutorResponse = {
         answer:
-          "I couldn't find enough evidence in your uploaded materials to answer that confidently. Try asking about a topic covered in your project documents.",
+            "I don't have enough evidence in this project's learning materials to answer that reliably.\n\nTry asking me about a concept covered in your uploaded materials.",
         grounded: false,
         insufficientEvidence: true,
         citations: [],

@@ -12,6 +12,8 @@ export type RagChunk = {
   materialName: string;
 };
 
+const MIN_SIMILARITY = 0.35;
+
 export async function searchProjectKnowledge(
   projectId: string,
   question: string
@@ -19,9 +21,7 @@ export async function searchProjectKnowledge(
   const supabase = await createClient();
 
   const {
-    data: {
-      user,
-    },
+    data: { user },
   } = await supabase.auth.getUser();
 
   if (!user) {
@@ -53,7 +53,7 @@ export async function searchProjectKnowledge(
     {
       query_embedding: embedding,
       match_project_id: projectId,
-      match_threshold: 0.35,
+      match_threshold: MIN_SIMILARITY,
       match_count: 8,
     }
   );
@@ -62,14 +62,22 @@ export async function searchProjectKnowledge(
     throw error;
   }
 
-  return (data ?? []).map((row) => ({
-    id: row.id,
-    materialId: row.material_id,
-    projectId: row.project_id,
-    content: row.content,
-    pageNumber: row.page_number,
-    chunkIndex: row.chunk_index,
-    similarity: Number(row.similarity),
-    materialName: row.filename,
-  }));
+  const rows = data ?? [];
+
+  return rows
+    .filter(
+      (row) =>
+        Number(row.similarity) >=
+        MIN_SIMILARITY
+    )
+    .map((row) => ({
+      id: row.id,
+      materialId: row.material_id,
+      projectId: row.project_id,
+      content: row.content,
+      pageNumber: row.page_number,
+      chunkIndex: row.chunk_index,
+      similarity: Number(row.similarity),
+      materialName: row.filename,
+    }));
 }
