@@ -46,11 +46,10 @@ export async function updateSession(request: NextRequest) {
    * Do not use getSession() here for authorization.
    * getClaims() verifies the token.
    */
-  const {
-    data: { claims },
-  } = await supabase.auth.getClaims();
+  const { data } =
+  await supabase.auth.getClaims();
 
-  const user = claims?.sub;
+  const user = data?.claims?.sub;
 
   const pathname = request.nextUrl.pathname;
 

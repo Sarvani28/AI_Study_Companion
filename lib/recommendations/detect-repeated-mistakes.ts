@@ -204,10 +204,9 @@ export async function detectRepeatedMistakes(
         mistake.lastSeen,
 
       pattern:
-        mistake.applicationSignals >
-        0
-          ? "application"
-          : "unknown",
+        mistake.applicationSignals > 0
+          ? ("application" as const)
+          : ("unknown" as const),
     }))
     .sort(
       (a, b) =>

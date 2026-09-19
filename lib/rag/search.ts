@@ -12,6 +12,17 @@ export type RagChunk = {
   materialName: string;
 };
 
+type MatchDocumentChunkRow = {
+  id: string;
+  material_id: string;
+  project_id: string;
+  content: string;
+  page_number: number | null;
+  chunk_index: number;
+  similarity: number;
+  filename: string;
+};
+
 const MIN_SIMILARITY = 0.35;
 
 export async function searchProjectKnowledge(
@@ -28,13 +39,15 @@ export async function searchProjectKnowledge(
     throw new Error("Unauthorized.");
   }
 
-  const { data: project, error: projectError } =
-    await supabase
-      .from("projects")
-      .select("id")
-      .eq("id", projectId)
-      .eq("user_id", user.id)
-      .maybeSingle();
+  const {
+    data: project,
+    error: projectError,
+  } = await supabase
+    .from("projects")
+    .select("id")
+    .eq("id", projectId)
+    .eq("user_id", user.id)
+    .maybeSingle();
 
   if (projectError) {
     throw projectError;
@@ -48,7 +61,10 @@ export async function searchProjectKnowledge(
     `search_query: ${question}`
   );
 
-  const { data, error } = await supabase.rpc(
+  const {
+    data,
+    error,
+  } = await supabase.rpc(
     "match_document_chunks",
     {
       query_embedding: embedding,
@@ -62,22 +78,25 @@ export async function searchProjectKnowledge(
     throw error;
   }
 
-  const rows = data ?? [];
+  const rows =
+    (data ?? []) as MatchDocumentChunkRow[];
 
   return rows
     .filter(
-      (row) =>
+      (row: MatchDocumentChunkRow) =>
         Number(row.similarity) >=
         MIN_SIMILARITY
     )
-    .map((row) => ({
-      id: row.id,
-      materialId: row.material_id,
-      projectId: row.project_id,
-      content: row.content,
-      pageNumber: row.page_number,
-      chunkIndex: row.chunk_index,
-      similarity: Number(row.similarity),
-      materialName: row.filename,
-    }));
+    .map(
+      (row: MatchDocumentChunkRow) => ({
+        id: row.id,
+        materialId: row.material_id,
+        projectId: row.project_id,
+        content: row.content,
+        pageNumber: row.page_number,
+        chunkIndex: row.chunk_index,
+        similarity: Number(row.similarity),
+        materialName: row.filename,
+      })
+    );
 }

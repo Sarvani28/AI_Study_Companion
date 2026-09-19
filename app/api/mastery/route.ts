@@ -224,16 +224,11 @@ export async function GET(request: Request) {
             conceptId:
               item.concept_id,
 
-            conceptName:
-              Array.isArray(
-                item.concepts
-              )
-                ? item.concepts[0]
-                    ?.name ??
-                  "Unknown concept"
-                : item.concepts
-                    ?.name ??
-                  "Unknown concept",
+      conceptName:
+        Array.isArray(item.concepts)
+          ? item.concepts[0]?.name ??
+            "Unknown concept"
+          : "Unknown concept",
 
             masteryScore:
               Number(
@@ -269,15 +264,10 @@ export async function GET(request: Request) {
               item.concept_id,
 
             conceptName:
-              Array.isArray(
-                item.concepts
-              )
-                ? item.concepts[0]
-                    ?.name ??
+              Array.isArray(item.concepts)
+                ? item.concepts[0]?.name ??
                   "Unknown concept"
-                : item.concepts
-                    ?.name ??
-                  "Unknown concept",
+                : "Unknown concept",
 
             oldMastery:
               Number(

@@ -1,10 +1,5 @@
-import {
-  generateChatResponse,
-} from "@/lib/ai/ollama";
-
-import {
-  recordAIRequest,
-} from "@/lib/ai/observability";
+import { generateChatResponse } from "@/lib/ai/ollama";
+import { recordAIRequest } from "@/lib/ai/observability";
 
 export type AIRequest = {
   feature: string;
@@ -23,41 +18,40 @@ export type AIResponse = {
 export async function generate(
   request: AIRequest,
 ): Promise<AIResponse> {
-  const startedAt =
-    Date.now();
+  const startedAt = Date.now();
 
   const model =
-    process.env
-      .OLLAMA_CHAT_MODEL ??
+    process.env.OLLAMA_CHAT_MODEL ??
     "llama3.2:latest";
 
   try {
+    const messages = [
+      ...(request.system
+        ? [
+            {
+              role: "system" as const,
+              content: request.system,
+            },
+          ]
+        : []),
+      {
+        role: "user" as const,
+        content: request.prompt,
+      },
+    ];
+
     const text =
-      await generateChatResponse({
-        system:
-          request.system ?? "",
-        prompt:
-          request.prompt,
-      });
+      await generateChatResponse(messages);
 
     const latencyMs =
-      Date.now() -
-      startedAt;
+      Date.now() - startedAt;
 
     await recordAIRequest({
-      feature:
-        request.feature,
-
-      userId:
-        request.userId,
-
-      projectId:
-        request.projectId,
-
+      feature: request.feature,
+      userId: request.userId,
+      projectId: request.projectId,
       model,
-
       latencyMs,
-
       success: true,
     });
 
@@ -68,25 +62,15 @@ export async function generate(
     };
   } catch (error) {
     const latencyMs =
-      Date.now() -
-      startedAt;
+      Date.now() - startedAt;
 
     await recordAIRequest({
-      feature:
-        request.feature,
-
-      userId:
-        request.userId,
-
-      projectId:
-        request.projectId,
-
+      feature: request.feature,
+      userId: request.userId,
+      projectId: request.projectId,
       model,
-
       latencyMs,
-
       success: false,
-
       errorMessage:
         error instanceof Error
           ? error.message
