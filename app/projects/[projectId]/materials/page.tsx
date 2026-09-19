@@ -173,6 +173,16 @@ export default function MaterialsPage({
 }: PageProps) {
   const { projectId } = use(params);
 
+  /*
+   * ----------------------------------------------------------
+   * FILE INPUT
+   * ----------------------------------------------------------
+   *
+   * IMPORTANT:
+   * Keep this input permanently mounted.
+   * Do NOT place it inside the empty-state conditional.
+   */
+
   const fileInputRef =
     useRef<HTMLInputElement | null>(null);
 
@@ -293,7 +303,22 @@ export default function MaterialsPage({
       return;
     }
 
-    fileInputRef.current?.click();
+    const input = fileInputRef.current;
+
+    if (!input) {
+      setError(
+        "The file picker is not ready yet. Please try again.",
+      );
+      return;
+    }
+
+    /*
+     * Reset first so selecting the same PDF again
+     * still triggers onChange.
+     */
+    input.value = "";
+
+    input.click();
   }
 
   /*
@@ -308,6 +333,10 @@ export default function MaterialsPage({
     const file =
       event.target.files?.[0];
 
+    /*
+     * Reset immediately.
+     * This also allows selecting the same file again.
+     */
     event.target.value = "";
 
     if (!file) {
@@ -315,8 +344,7 @@ export default function MaterialsPage({
     }
 
     const isPdf =
-      file.type ===
-        "application/pdf" ||
+      file.type === "application/pdf" ||
       file.name
         .toLowerCase()
         .endsWith(".pdf");
@@ -325,7 +353,6 @@ export default function MaterialsPage({
       setError(
         "Only PDF files are supported.",
       );
-
       return;
     }
 
@@ -336,7 +363,6 @@ export default function MaterialsPage({
       setError(
         "The PDF must be smaller than 20 MB.",
       );
-
       return;
     }
 
@@ -366,13 +392,22 @@ export default function MaterialsPage({
           },
         );
 
-      const result =
-        await response.json();
+      let result: {
+        error?: string;
+        material?: Material;
+      } = {};
+
+      try {
+        result =
+          await response.json();
+      } catch {
+        result = {};
+      }
 
       if (!response.ok) {
         throw new Error(
           result.error ||
-            "Upload failed.",
+            `Upload failed (${response.status}).`,
         );
       }
 
@@ -626,6 +661,19 @@ export default function MaterialsPage({
 
   return (
     <AppShell>
+      {/* ------------------------------------------------
+          PERMANENT HIDDEN FILE INPUT
+          ------------------------------------------------ */}
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="application/pdf,.pdf"
+        onChange={handleFileChange}
+        className="hidden"
+        aria-hidden="true"
+      />
+
       <main className="min-h-screen bg-[#f7f8fc]">
         <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:px-8 lg:py-10">
 
@@ -648,6 +696,7 @@ export default function MaterialsPage({
 
           <section className="mt-6 overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-sm">
             <div className="relative overflow-hidden px-6 py-8 sm:px-8 sm:py-10">
+
               <div
                 aria-hidden="true"
                 className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-indigo-100/70 blur-3xl"
@@ -659,6 +708,7 @@ export default function MaterialsPage({
               />
 
               <div className="relative flex flex-col gap-8 lg:flex-row lg:items-center lg:justify-between">
+
                 <div className="max-w-2xl">
                   <div className="inline-flex items-center gap-2 rounded-full border border-indigo-100 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700">
                     <Sparkles className="h-3.5 w-3.5" />
@@ -724,6 +774,7 @@ export default function MaterialsPage({
           ================================================= */}
 
           <section className="mt-6 grid gap-3 sm:grid-cols-3">
+
             <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
               <div className="flex items-center justify-between">
                 <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
@@ -783,6 +834,7 @@ export default function MaterialsPage({
                 Being prepared for learning
               </p>
             </div>
+
           </section>
 
           {/* =================================================
@@ -790,6 +842,7 @@ export default function MaterialsPage({
           ================================================= */}
 
           <section className="mt-10">
+
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <h2 className="text-xl font-semibold tracking-tight text-gray-950">
@@ -817,13 +870,16 @@ export default function MaterialsPage({
 
             {materials.length === 0 ? (
               <div className="mt-5 overflow-hidden rounded-3xl border border-dashed border-gray-300 bg-white">
+
                 <div className="relative px-6 py-16 text-center sm:px-10">
+
                   <div
                     aria-hidden="true"
                     className="pointer-events-none absolute left-1/2 top-1/2 h-64 w-64 -translate-x-1/2 -translate-y-1/2 rounded-full bg-indigo-50 blur-3xl"
                   />
 
                   <div className="relative">
+
                     <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600">
                       <FileText className="h-7 w-7" />
                     </div>
@@ -843,21 +899,31 @@ export default function MaterialsPage({
                       type="button"
                       onClick={openFilePicker}
                       disabled={uploading}
-                      className="mt-7 inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-gray-950 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-600 disabled:opacity-60"
+                      className="mt-7 inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-gray-950 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-600 disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      <Upload className="h-4 w-4" />
-
-                      Upload your first PDF
+                      {uploading ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Uploading...
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="h-4 w-4" />
+                          Upload your first PDF
+                        </>
+                      )}
                     </button>
 
                     <p className="mt-3 text-xs text-gray-400">
                       PDF files up to 20 MB
                     </p>
+
                   </div>
                 </div>
               </div>
             ) : (
               <div className="mt-5 grid gap-4 md:grid-cols-2">
+
                 {materials.map(
                   (material) => {
                     const progress =
@@ -878,10 +944,13 @@ export default function MaterialsPage({
                         key={material.id}
                         className="group relative overflow-visible rounded-2xl border border-gray-200 bg-white p-5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-gray-300 hover:shadow-md"
                       >
-                        {/* Card top */}
+
+                        {/* CARD TOP */}
 
                         <div className="flex items-start justify-between gap-4">
+
                           <div className="flex min-w-0 items-start gap-4">
+
                             <div
                               className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${getFileIconClasses(
                                 material.status,
@@ -902,18 +971,18 @@ export default function MaterialsPage({
                             </div>
 
                             <div className="min-w-0">
+
                               <h3 className="truncate text-sm font-semibold text-gray-950">
                                 {material.filename}
                               </h3>
 
                               <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-400">
+
                                 <span>PDF</span>
 
                                 {material.page_count ? (
                                   <>
-                                    <span>
-                                      •
-                                    </span>
+                                    <span>•</span>
 
                                     <span>
                                       {
@@ -926,6 +995,7 @@ export default function MaterialsPage({
                                     </span>
                                   </>
                                 ) : null}
+
                               </div>
                             </div>
                           </div>
@@ -965,6 +1035,7 @@ export default function MaterialsPage({
 
                             {isMenuOpen ? (
                               <div className="absolute right-0 top-11 z-50 w-44 rounded-xl border border-gray-200 bg-white p-1.5 shadow-xl">
+
                                 <button
                                   type="button"
                                   disabled={
@@ -985,19 +1056,23 @@ export default function MaterialsPage({
 
                                   Delete material
                                 </button>
+
                               </div>
                             ) : null}
                           </div>
+
                         </div>
 
-                        {/* Status */}
+                        {/* STATUS */}
 
                         <div className="mt-5 flex items-center justify-between gap-3">
+
                           <span
                             className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${getStatusClasses(
                               material.status,
                             )}`}
                           >
+
                             {material.status ===
                             "ready" ? (
                               <Check className="h-3 w-3" />
@@ -1014,23 +1089,29 @@ export default function MaterialsPage({
                             {getStatusLabel(
                               material.status,
                             )}
+
                           </span>
 
                           <span className="flex items-center gap-1.5 text-xs text-gray-400">
+
                             <Clock3 className="h-3.5 w-3.5" />
 
                             {formatRelativeTime(
                               material.updated_at,
                             )}
+
                           </span>
+
                         </div>
 
-                        {/* Processing progress */}
+                        {/* QUEUED */}
 
                         {material.status ===
                         "queued" ? (
                           <div className="mt-5">
+
                             <div className="flex items-center justify-between text-xs">
+
                               <span className="text-gray-400">
                                 Waiting to process
                               </span>
@@ -1038,6 +1119,7 @@ export default function MaterialsPage({
                               <span className="font-medium text-gray-500">
                                 {progress}%
                               </span>
+
                             </div>
 
                             <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-gray-100">
@@ -1048,13 +1130,18 @@ export default function MaterialsPage({
                                 }}
                               />
                             </div>
+
                           </div>
                         ) : null}
+
+                        {/* PROCESSING */}
 
                         {material.status ===
                         "processing" ? (
                           <div className="mt-5">
+
                             <div className="flex items-center justify-between text-xs">
+
                               <span className="text-gray-400">
                                 Preparing document
                               </span>
@@ -1062,6 +1149,7 @@ export default function MaterialsPage({
                               <span className="font-medium text-indigo-600">
                                 {progress}%
                               </span>
+
                             </div>
 
                             <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-indigo-50">
@@ -1077,15 +1165,18 @@ export default function MaterialsPage({
                               Extracting, chunking and
                               indexing document...
                             </p>
+
                           </div>
                         ) : null}
 
-                        {/* Ready */}
+                        {/* READY */}
 
                         {material.status ===
                         "ready" ? (
                           <div className="mt-5 rounded-xl border border-emerald-100 bg-emerald-50/60 px-3.5 py-3">
+
                             <div className="flex items-start gap-2.5">
+
                               <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
 
                               <p className="text-xs leading-5 text-emerald-800">
@@ -1093,31 +1184,40 @@ export default function MaterialsPage({
                                 ready for grounded AI
                                 Tutor conversations.
                               </p>
+
                             </div>
+
                           </div>
                         ) : null}
 
-                        {/* Failed */}
+                        {/* FAILED */}
 
                         {material.status ===
                         "failed" ? (
                           <div className="mt-5 rounded-xl border border-red-100 bg-red-50 px-3.5 py-3">
+
                             <div className="flex items-start gap-2.5">
+
                               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
 
                               <p className="text-xs leading-5 text-red-700">
                                 {material.error_message ||
                                   "Document processing failed."}
                               </p>
+
                             </div>
+
                           </div>
                         ) : null}
+
                       </article>
                     );
                   },
                 )}
+
               </div>
             )}
+
           </section>
         </div>
       </main>
@@ -1147,8 +1247,11 @@ export default function MaterialsPage({
               event.stopPropagation()
             }
           >
+
             <div className="p-7">
+
               <div className="flex items-start justify-between">
+
                 <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-50 text-red-600">
                   <Trash2 className="h-5 w-5" />
                 </div>
@@ -1165,6 +1268,7 @@ export default function MaterialsPage({
                 >
                   <X className="h-4 w-4" />
                 </button>
+
               </div>
 
               <h2 className="mt-6 text-xl font-semibold tracking-tight text-gray-950">
@@ -1186,9 +1290,11 @@ export default function MaterialsPage({
                   to this project's knowledge base.
                 </p>
               </div>
+
             </div>
 
             <div className="flex items-center justify-end gap-3 border-t border-gray-100 bg-gray-50/70 px-7 py-5">
+
               <button
                 type="button"
                 disabled={Boolean(
@@ -1226,10 +1332,12 @@ export default function MaterialsPage({
                   </>
                 )}
               </button>
+
             </div>
           </div>
         </div>
       ) : null}
+
     </AppShell>
   );
 }
