@@ -1,6 +1,4 @@
-"use client";
-
-import { SpaceCard } from "./space-card";
+import { SpaceCard } from "@/components/spaces/space-card";
 
 type Space = {
   id: string;
@@ -12,19 +10,22 @@ type Space = {
 
 type SpacesGridProps = {
   spaces: Space[];
+  onDelete: (id: string) => Promise<void>;
 };
 
-export function SpacesGrid({ spaces }: SpacesGridProps) {
+export function SpacesGrid({
+  spaces,
+  onDelete,
+}: SpacesGridProps) {
   if (spaces.length === 0) {
     return (
-      <div className="rounded-2xl border border-dashed p-10 text-center">
-        <h2 className="text-lg font-semibold">
+      <div className="rounded-2xl border border-dashed border-gray-200 bg-white p-12 text-center">
+        <h2 className="text-lg font-semibold text-gray-950">
           No spaces yet
         </h2>
 
-        <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted-foreground">
-          Create your first learning space to organize projects,
-          materials, quizzes, and progress.
+        <p className="mt-2 text-sm text-gray-500">
+          Create your first learning space to get started.
         </p>
       </div>
     );
@@ -34,13 +35,17 @@ export function SpacesGrid({ spaces }: SpacesGridProps) {
     <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
       {spaces.map((space) => (
         <SpaceCard
-          key={space.id}
-          id={space.id}
-          name={space.name}
-          description={space.description}
-          projectCount={space.projectCount}
-          averageMastery={space.averageMastery}
-        />
+            key={space.id}
+            id={space.id}
+            name={space.name}
+            description={space.description}
+            projectCount={space.projectCount}
+            averageMastery={space.averageMastery}
+            onDeleted={(deletedId) => {
+              // The parent will refresh the page/list.
+              window.location.reload();
+            }}
+          />
       ))}
     </div>
   );
