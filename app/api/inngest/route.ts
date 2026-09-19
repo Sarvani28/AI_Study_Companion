@@ -12,7 +12,5 @@ export const {
   PUT,
 } = serve({
   client: inngest,
-  functions: [
-    processMaterial,
-  ],
+  functions: [],
 });
