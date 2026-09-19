@@ -4,7 +4,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BarChart3,
-  BookOpen,
   Brain,
   ChevronDown,
   FileText,
@@ -43,30 +42,37 @@ const workspaceItems = [
 const projectItems = [
   {
     label: "Overview",
+    path: "",
     icon: Gauge,
   },
   {
     label: "Materials",
+    path: "/materials",
     icon: FileText,
   },
   {
     label: "AI Tutor",
+    path: "/tutor",
     icon: MessageCircle,
   },
   {
     label: "Quiz",
+    path: "/quiz",
     icon: Target,
   },
   {
     label: "Mastery",
+    path: "/mastery",
     icon: Brain,
   },
   {
     label: "Growth",
+    path: "/growth",
     icon: BarChart3,
   },
   {
     label: "Analytics",
+    path: "/analytics",
     icon: BarChart3,
   },
 ];
@@ -85,8 +91,32 @@ export function Sidebar({
     window.location.href = "/login";
   }
 
+  /*
+   * We don't yet have a selected project context in the sidebar.
+   *
+   * The project routes will eventually look like:
+   *
+   * /projects/[projectId]
+   * /projects/[projectId]/materials
+   * /projects/[projectId]/tutor
+   * /projects/[projectId]/quiz
+   * /projects/[projectId]/mastery
+   * /projects/[projectId]/growth
+   * /projects/[projectId]/analytics
+   *
+   * For now we detect a project ID from the current URL.
+   */
+  const projectMatch = pathname.match(
+    /^\/projects\/([^/]+)/
+  );
+
+  const currentProjectId = projectMatch?.[1] ?? null;
+
+  const isProjectRoute = Boolean(currentProjectId);
+
   return (
     <>
+      {/* Mobile backdrop */}
       {mobileOpen && (
         <button
           type="button"
@@ -103,6 +133,9 @@ export function Sidebar({
             : "-translate-x-full lg:translate-x-0"
         }`}
       >
+        {/* =========================================================
+            BRAND
+        ========================================================== */}
         <div className="flex h-16 items-center justify-between border-b border-gray-100 px-5">
           <Link
             href="/dashboard"
@@ -134,7 +167,13 @@ export function Sidebar({
           </button>
         </div>
 
+        {/* =========================================================
+            NAVIGATION
+        ========================================================== */}
         <div className="flex-1 overflow-y-auto px-3 py-6">
+          {/* =======================================================
+              WORKSPACE
+          ======================================================== */}
           <div>
             <p className="px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-400">
               Workspace
@@ -143,7 +182,12 @@ export function Sidebar({
             <nav className="mt-3 space-y-1">
               {workspaceItems.map((item) => {
                 const Icon = item.icon;
-                const active = pathname === item.href;
+
+                const active =
+                  item.href === "/spaces"
+                    ? pathname === "/spaces" ||
+                      pathname.startsWith("/spaces/")
+                    : pathname === item.href;
 
                 return (
                   <Link
@@ -168,8 +212,12 @@ export function Sidebar({
             </nav>
           </div>
 
+          {/* Divider */}
           <div className="my-6 h-px bg-gray-100" />
 
+          {/* =======================================================
+              CURRENT PROJECT
+          ======================================================== */}
           <div>
             <div className="flex items-center justify-between px-3">
               <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-400">
@@ -179,33 +227,106 @@ export function Sidebar({
               <ChevronDown className="h-3.5 w-3.5 text-gray-300" />
             </div>
 
+            {/* =====================================================
+                CURRENT PROJECT CARD
+            ====================================================== */}
             <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3">
-              <div className="flex items-center gap-2">
-                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-white text-indigo-600 shadow-sm">
-                  <GraduationCap className="h-4 w-4" />
-                </div>
+              {currentProjectId ? (
+                <Link
+                  href={`/projects/${currentProjectId}`}
+                  onClick={onClose}
+                  className="group flex items-center gap-2"
+                >
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white text-indigo-600 shadow-sm">
+                    <GraduationCap className="h-4 w-4" />
+                  </div>
 
-                <div className="min-w-0">
-                  <p className="truncate text-xs font-semibold text-gray-900">
-                    RAG Fundamentals
-                  </p>
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-semibold text-gray-900 group-hover:text-indigo-700">
+                      Current Project
+                    </p>
 
-                  <p className="truncate text-[10px] text-gray-400">
-                    In progress
-                  </p>
-                </div>
-              </div>
+                    <p className="truncate text-[10px] text-gray-400">
+                      In progress
+                    </p>
+                  </div>
+                </Link>
+              ) : (
+                <Link
+                  href="/spaces"
+                  onClick={onClose}
+                  className="group flex items-center gap-2"
+                >
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white text-gray-500 shadow-sm">
+                    <FolderKanban className="h-4 w-4" />
+                  </div>
+
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-semibold text-gray-900 group-hover:text-indigo-700">
+                      No project selected
+                    </p>
+
+                    <p className="truncate text-[10px] text-gray-400">
+                      Choose a project
+                    </p>
+                  </div>
+                </Link>
+              )}
             </div>
 
+            {/* =====================================================
+                PROJECT NAVIGATION
+            ====================================================== */}
             <nav className="mt-3 space-y-1">
               {projectItems.map((item) => {
                 const Icon = item.icon;
 
+                /*
+                 * We only make these links active/functional once
+                 * a real project ID exists in the URL.
+                 */
+                const href = currentProjectId
+                  ? `/projects/${currentProjectId}${item.path}`
+                  : "#";
+
+                const active = currentProjectId
+                  ? item.path === ""
+                    ? pathname === `/projects/${currentProjectId}`
+                    : pathname ===
+                      `/projects/${currentProjectId}${item.path}`
+                  : false;
+
+                /*
+                 * Until a project exists, these are visually disabled.
+                 */
+                if (!currentProjectId) {
+                  return (
+                    <button
+                      key={item.label}
+                      type="button"
+                      disabled
+                      className="flex h-9 w-full cursor-not-allowed items-center gap-3 rounded-xl px-3 text-sm font-medium text-gray-300"
+                    >
+                      <Icon
+                        className="h-4 w-4"
+                        strokeWidth={1.8}
+                      />
+
+                      {item.label}
+                    </button>
+                  );
+                }
+
                 return (
-                  <button
+                  <Link
                     key={item.label}
-                    type="button"
-                    className="flex h-9 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium text-gray-500 transition hover:bg-gray-50 hover:text-gray-900"
+                    href={href}
+                    onClick={onClose}
+                    className={`flex h-9 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium transition ${
+                      active
+                        ? "bg-indigo-50 text-indigo-700"
+                        : "text-gray-500 hover:bg-gray-50 hover:text-gray-900"
+                    }`}
                   >
                     <Icon
                       className="h-4 w-4"
@@ -213,19 +334,28 @@ export function Sidebar({
                     />
 
                     {item.label}
-                  </button>
+                  </Link>
                 );
               })}
             </nav>
           </div>
         </div>
 
+        {/* =========================================================
+            FOOTER
+        ========================================================== */}
         <div className="border-t border-gray-100 p-3">
           <Link
             href="/settings"
-            className="flex h-10 items-center gap-3 rounded-xl px-3 text-sm font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-950"
+            onClick={onClose}
+            className={`flex h-10 items-center gap-3 rounded-xl px-3 text-sm font-medium transition ${
+              pathname === "/settings"
+                ? "bg-indigo-50 text-indigo-700"
+                : "text-gray-600 hover:bg-gray-50 hover:text-gray-950"
+            }`}
           >
             <Settings className="h-4 w-4" />
+
             Settings
           </Link>
 
@@ -235,6 +365,7 @@ export function Sidebar({
             className="mt-1 flex h-10 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium text-gray-500 transition hover:bg-red-50 hover:text-red-600"
           >
             <LogOut className="h-4 w-4" />
+
             Sign out
           </button>
         </div>
