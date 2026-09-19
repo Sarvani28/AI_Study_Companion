@@ -162,22 +162,21 @@ export function Sidebar({
   const isProjectRoute =
     Boolean(routeProjectId);
 
-  /*
-   * Explicit navigation helper.
-   *
-   * We use router.push instead of depending only
-   * on <Link>. This makes navigation behavior
-   * predictable after deployment.
-   */
   function navigateTo(href: string) {
-    onClose();
+  onClose();
 
-    if (pathname === href) {
-      return;
-    }
+  console.log("[SIDEBAR NAVIGATION]", {
+    from: pathname,
+    to: href,
+    currentProjectId,
+  });
 
-    router.push(href);
+  if (pathname === href) {
+    return;
   }
+
+  router.push(href);
+}
 
   function isWorkspaceActive(
     href: string
