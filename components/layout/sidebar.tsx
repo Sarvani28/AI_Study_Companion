@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import {
   BarChart3,
   Brain,
@@ -77,11 +78,152 @@ const projectItems = [
   },
 ];
 
+const SELECTED_PROJECT_KEY =
+  "studyai:selected-project-id";
+
 export function Sidebar({
   mobileOpen,
   onClose,
 }: SidebarProps) {
   const pathname = usePathname();
+
+  /*
+   * Project ID detected from the current URL.
+   *
+   * Examples:
+   *
+   * /projects/123
+   * /projects/123/materials
+   * /projects/123/tutor
+   */
+  const projectMatch = pathname.match(
+    /^\/projects\/([^/]+)/
+  );
+
+  const routeProjectId = projectMatch?.[1] ?? null;
+
+  /*
+   * Keep a project ID in local state as well.
+   *
+   * This allows the sidebar to remember the last selected
+   * project when the user navigates back to /spaces.
+   */
+  const [storedProjectId, setStoredProjectId] =
+    useState<string | null>(null);
+
+  /*
+   * Read the previously selected project.
+   */
+  useEffect(() => {
+    const savedProjectId = window.localStorage.getItem(
+      SELECTED_PROJECT_KEY
+    );
+
+    if (savedProjectId) {
+      setStoredProjectId(savedProjectId);
+    }
+  }, []);
+
+  /*
+   * Whenever the user visits a project route, save that
+   * project as the current project.
+   */
+  useEffect(() => {
+    if (!routeProjectId) {
+      return;
+    }
+
+    window.localStorage.setItem(
+      SELECTED_PROJECT_KEY,
+      routeProjectId
+    );
+
+    setStoredProjectId(routeProjectId);
+  }, [routeProjectId]);
+
+  /*
+   * Prefer the project from the URL.
+   *
+   * If we are on /spaces, fall back to the last project
+   * the user opened.
+   */
+  const currentProjectId =
+    routeProjectId ?? storedProjectId;
+
+  /*
+   * Determine whether we are actually inside a project
+   * route.
+   */
+  const isProjectRoute = Boolean(routeProjectId);
+
+  /*
+   * Workspace active state.
+   */
+  function isWorkspaceActive(href: string) {
+    if (href === "/spaces") {
+      return (
+        pathname === "/spaces" ||
+        pathname.startsWith("/spaces/")
+      );
+    }
+
+    return pathname === href;
+  }
+
+  /*
+   * Project navigation active state.
+   */
+  function isProjectItemActive(path: string) {
+    if (!routeProjectId) {
+      return false;
+    }
+
+    const basePath = `/projects/${routeProjectId}`;
+
+    /*
+     * Overview
+     */
+    if (path === "") {
+      return pathname === basePath;
+    }
+
+    /*
+     * Nested project pages.
+     *
+     * Example:
+     *
+     * /projects/123/materials
+     * /projects/123/materials/something
+     */
+    const itemPath = `${basePath}${path}`;
+
+    return (
+      pathname === itemPath ||
+      pathname.startsWith(`${itemPath}/`)
+    );
+  }
+
+  /*
+   * Build the destination for project navigation.
+   *
+   * If a project is selected:
+   *
+   *   /projects/:id/materials
+   *
+   * If no project is selected:
+   *
+   *   /spaces
+   *
+   * This makes the navigation clickable instead of
+   * rendering disabled buttons.
+   */
+  function getProjectHref(path: string) {
+    if (currentProjectId) {
+      return `/projects/${currentProjectId}${path}`;
+    }
+
+    return "/spaces";
+  }
 
   async function handleLogout() {
     const supabase = createClient();
@@ -91,32 +233,11 @@ export function Sidebar({
     window.location.href = "/login";
   }
 
-  /*
-   * We don't yet have a selected project context in the sidebar.
-   *
-   * The project routes will eventually look like:
-   *
-   * /projects/[projectId]
-   * /projects/[projectId]/materials
-   * /projects/[projectId]/tutor
-   * /projects/[projectId]/quiz
-   * /projects/[projectId]/mastery
-   * /projects/[projectId]/growth
-   * /projects/[projectId]/analytics
-   *
-   * For now we detect a project ID from the current URL.
-   */
-  const projectMatch = pathname.match(
-    /^\/projects\/([^/]+)/
-  );
-
-  const currentProjectId = projectMatch?.[1] ?? null;
-
-  const isProjectRoute = Boolean(currentProjectId);
-
   return (
     <>
-      {/* Mobile backdrop */}
+      {/* =========================================================
+          MOBILE BACKDROP
+      ========================================================== */}
       {mobileOpen && (
         <button
           type="button"
@@ -126,6 +247,9 @@ export function Sidebar({
         />
       )}
 
+      {/* =========================================================
+          SIDEBAR
+      ========================================================== */}
       <aside
         className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-gray-200 bg-white transition-transform duration-200 lg:translate-x-0 ${
           mobileOpen
@@ -133,9 +257,9 @@ export function Sidebar({
             : "-translate-x-full lg:translate-x-0"
         }`}
       >
-        {/* =========================================================
+        {/* =======================================================
             BRAND
-        ========================================================== */}
+        ======================================================== */}
         <div className="flex h-16 items-center justify-between border-b border-gray-100 px-5">
           <Link
             href="/dashboard"
@@ -167,14 +291,14 @@ export function Sidebar({
           </button>
         </div>
 
-        {/* =========================================================
+        {/* =======================================================
             NAVIGATION
-        ========================================================== */}
+        ======================================================== */}
         <div className="flex-1 overflow-y-auto px-3 py-6">
-          {/* =======================================================
+          {/* =====================================================
               WORKSPACE
-          ======================================================== */}
-          <div>
+          ====================================================== */}
+          <section>
             <p className="px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-400">
               Workspace
             </p>
@@ -183,11 +307,9 @@ export function Sidebar({
               {workspaceItems.map((item) => {
                 const Icon = item.icon;
 
-                const active =
-                  item.href === "/spaces"
-                    ? pathname === "/spaces" ||
-                      pathname.startsWith("/spaces/")
-                    : pathname === item.href;
+                const active = isWorkspaceActive(
+                  item.href
+                );
 
                 return (
                   <Link
@@ -205,31 +327,36 @@ export function Sidebar({
                       strokeWidth={1.8}
                     />
 
-                    {item.label}
+                    <span>{item.label}</span>
                   </Link>
                 );
               })}
             </nav>
-          </div>
+          </section>
 
-          {/* Divider */}
+          {/* =====================================================
+              DIVIDER
+          ====================================================== */}
           <div className="my-6 h-px bg-gray-100" />
 
-          {/* =======================================================
+          {/* =====================================================
               CURRENT PROJECT
-          ======================================================== */}
-          <div>
+          ====================================================== */}
+          <section>
             <div className="flex items-center justify-between px-3">
               <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-400">
                 Current project
               </p>
 
-              <ChevronDown className="h-3.5 w-3.5 text-gray-300" />
+              <ChevronDown
+                className="h-3.5 w-3.5 text-gray-300"
+                strokeWidth={1.8}
+              />
             </div>
 
-            {/* =====================================================
-                CURRENT PROJECT CARD
-            ====================================================== */}
+            {/* ===================================================
+                PROJECT CARD
+            ==================================================== */}
             <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3">
               {currentProjectId ? (
                 <Link
@@ -247,7 +374,9 @@ export function Sidebar({
                     </p>
 
                     <p className="truncate text-[10px] text-gray-400">
-                      In progress
+                      {isProjectRoute
+                        ? "In progress"
+                        : "Recently selected"}
                     </p>
                   </div>
                 </Link>
@@ -274,46 +403,39 @@ export function Sidebar({
               )}
             </div>
 
-            {/* =====================================================
+            {/* ===================================================
                 PROJECT NAVIGATION
-            ====================================================== */}
+            ==================================================== */}
             <nav className="mt-3 space-y-1">
               {projectItems.map((item) => {
                 const Icon = item.icon;
 
-                /*
-                 * We only make these links active/functional once
-                 * a real project ID exists in the URL.
-                 */
-                const href = currentProjectId
-                  ? `/projects/${currentProjectId}${item.path}`
-                  : "#";
+                const href = getProjectHref(
+                  item.path
+                );
 
-                const active = currentProjectId
-                  ? item.path === ""
-                    ? pathname === `/projects/${currentProjectId}`
-                    : pathname ===
-                      `/projects/${currentProjectId}${item.path}`
-                  : false;
+                const active =
+                  isProjectItemActive(item.path);
 
                 /*
-                 * Until a project exists, these are visually disabled.
+                 * If there is no project, the navigation still
+                 * works, but takes the user to /spaces.
                  */
                 if (!currentProjectId) {
                   return (
-                    <button
+                    <Link
                       key={item.label}
-                      type="button"
-                      disabled
-                      className="flex h-9 w-full cursor-not-allowed items-center gap-3 rounded-xl px-3 text-sm font-medium text-gray-300"
+                      href="/spaces"
+                      onClick={onClose}
+                      className="flex h-9 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium text-gray-400 transition hover:bg-gray-50 hover:text-gray-700"
                     >
                       <Icon
                         className="h-4 w-4"
                         strokeWidth={1.8}
                       />
 
-                      {item.label}
-                    </button>
+                      <span>{item.label}</span>
+                    </Link>
                   );
                 }
 
@@ -333,18 +455,28 @@ export function Sidebar({
                       strokeWidth={1.8}
                     />
 
-                    {item.label}
+                    <span>{item.label}</span>
                   </Link>
                 );
               })}
             </nav>
-          </div>
+
+            {/* ===================================================
+                HELPER TEXT
+            ==================================================== */}
+            {!currentProjectId && (
+              <p className="mt-3 px-3 text-[11px] leading-5 text-gray-400">
+                Open a project to use its learning tools.
+              </p>
+            )}
+          </section>
         </div>
 
         {/* =========================================================
             FOOTER
         ========================================================== */}
         <div className="border-t border-gray-100 p-3">
+          {/* Settings */}
           <Link
             href="/settings"
             onClick={onClose}
@@ -354,19 +486,26 @@ export function Sidebar({
                 : "text-gray-600 hover:bg-gray-50 hover:text-gray-950"
             }`}
           >
-            <Settings className="h-4 w-4" />
+            <Settings
+              className="h-4 w-4"
+              strokeWidth={1.8}
+            />
 
-            Settings
+            <span>Settings</span>
           </Link>
 
+          {/* Sign out */}
           <button
             type="button"
             onClick={handleLogout}
             className="mt-1 flex h-10 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium text-gray-500 transition hover:bg-red-50 hover:text-red-600"
           >
-            <LogOut className="h-4 w-4" />
+            <LogOut
+              className="h-4 w-4"
+              strokeWidth={1.8}
+            />
 
-            Sign out
+            <span>Sign out</span>
           </button>
         </div>
       </aside>
