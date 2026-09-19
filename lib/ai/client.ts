@@ -1,14 +1,98 @@
-import OpenAI from "openai";
+import {
+  generateChatResponse,
+} from "@/lib/ai/ollama";
 
-export const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+import {
+  recordAIRequest,
+} from "@/lib/ai/observability";
 
-export const EMBEDDING_MODEL =
-  "text-embedding-3-small";
+export type AIRequest = {
+  feature: string;
+  userId?: string;
+  projectId?: string;
+  system?: string;
+  prompt: string;
+};
 
-export const TUTOR_MODEL =
-  "gpt-4.1-mini";
+export type AIResponse = {
+  text: string;
+  model: string;
+  latencyMs: number;
+};
 
-export const QUIZ_MODEL =
-  "gpt-4.1-mini";
+export async function generate(
+  request: AIRequest,
+): Promise<AIResponse> {
+  const startedAt =
+    Date.now();
+
+  const model =
+    process.env
+      .OLLAMA_CHAT_MODEL ??
+    "llama3.2:latest";
+
+  try {
+    const text =
+      await generateChatResponse({
+        system:
+          request.system ?? "",
+        prompt:
+          request.prompt,
+      });
+
+    const latencyMs =
+      Date.now() -
+      startedAt;
+
+    await recordAIRequest({
+      feature:
+        request.feature,
+
+      userId:
+        request.userId,
+
+      projectId:
+        request.projectId,
+
+      model,
+
+      latencyMs,
+
+      success: true,
+    });
+
+    return {
+      text,
+      model,
+      latencyMs,
+    };
+  } catch (error) {
+    const latencyMs =
+      Date.now() -
+      startedAt;
+
+    await recordAIRequest({
+      feature:
+        request.feature,
+
+      userId:
+        request.userId,
+
+      projectId:
+        request.projectId,
+
+      model,
+
+      latencyMs,
+
+      success: false,
+
+      errorMessage:
+        error instanceof Error
+          ? error.message
+          : "Unknown AI error",
+    });
+
+    throw error;
+  }
+}

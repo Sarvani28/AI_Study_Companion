@@ -1,27 +1,20 @@
-import {
-  EMBEDDING_MODEL,
-  openai,
-} from "@/lib/ai/client";
+import { generateEmbedding } from "@/lib/ai/embeddings-client";
 
 export async function createEmbeddings(
   texts: string[],
-) {
+): Promise<number[][]> {
   if (texts.length === 0) {
     return [];
   }
 
-  const response =
-    await openai.embeddings.create({
-      model: EMBEDDING_MODEL,
-      input: texts,
-      encoding_format: "float",
-    });
+  const embeddings: number[][] = [];
 
-  return response.data
-    .sort(
-      (a, b) => a.index - b.index,
-    )
-    .map(
-      (item) => item.embedding,
-    );
+  for (const text of texts) {
+    const embedding =
+      await generateEmbedding(text);
+
+    embeddings.push(embedding);
+  }
+
+  return embeddings;
 }

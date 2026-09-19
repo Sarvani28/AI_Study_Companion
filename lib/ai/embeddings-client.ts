@@ -6,7 +6,7 @@ const EMBEDDING_MODEL =
   process.env.OLLAMA_EMBEDDING_MODEL ??
   "nomic-embed-text:latest";
 
-async function generateEmbedding(
+export async function generateEmbedding(
   text: string,
 ): Promise<number[]> {
   const response =
@@ -51,22 +51,4 @@ async function generateEmbedding(
   }
 
   return result.embedding;
-}
-
-export async function createEmbeddings(
-  texts: string[],
-): Promise<number[][]> {
-  if (texts.length === 0) {
-    return [];
-  }
-
-  const embeddings: number[][] = [];
-
-  for (const text of texts) {
-    embeddings.push(
-      await generateEmbedding(text),
-    );
-  }
-
-  return embeddings;
 }
